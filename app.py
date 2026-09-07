@@ -82,7 +82,7 @@ def smart_analyze_pdf(filename, text):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊展開即時管理、下載或傳送！")
+st.write("批量上傳 PDF，點擊展開即時管理、下載、傳送或批量刪除！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -206,12 +206,28 @@ with tab2:
 
         st.markdown("---")
         
-        # 逐個以 Expander（展開面板）方式展示檔案，兼具標題、直接開啟按鈕同刪除掣
+        # --- 批量刪除控制區 ---
+        if filtered_data:
+            col_b1, col_b2 = st.columns([2, 4])
+            with col_b1:
+                select_all = st.checkbox("☑️ 全選目前顯示的檔案", key="select_all_checkbox")
+            
+            # 建立勾選狀態字典
+            selected_ids = []
+            st.markdown("<br>", unsafe_allow_html=True)
+
+        # 逐個以 Expander 方式展示檔案，並加入批量勾選框
         for item in filtered_data:
             file_path = os.path.join(PDF_DIR, item['filename'])
             
-            col_ex, col_del = st.columns([9, 1])
+            col_chk, col_ex, col_del = st.columns([0.6, 8.4, 1])
             
+            with col_chk:
+                # 勾選框
+                is_checked = st.checkbox("", value=select_all, key=f"chk_{item['id']}")
+                if is_checked:
+                    selected_ids.append(item['id'])
+                    
             with col_ex:
                 with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']}"):
                     if os.path.exists(file_path):
@@ -255,6 +271,24 @@ with tab2:
                     save_db(db_data)
                     
                     st.success(f"已刪除：{item['original_filename']}")
+                    st.rerun()
+
+        # --- 批量刪除執行按鈕 ---
+        if filtered_data:
+            st.markdown("---")
+            if selected_ids:
+                if st.button(f"🗑️ 批量刪除已選取的 {len(selected_ids)} 個檔案", type="primary"):
+                    db_data_updated = []
+                    for item in db_data:
+                        if item['id'] in selected_ids:
+                            target_path = os.path.join(PDF_DIR, item['filename'])
+                            if os.path.exists(target_path):
+                                os.remove(target_path)
+                        else:
+                            db_data_updated.append(item)
+                    
+                    save_db(db_data_updated)
+                    st.success(f"🎉 成功批量刪除 {len(selected_ids)} 個檔案！")
                     st.rerun()
 
 # --- 專屬水印 Footer ---
