@@ -84,10 +84,21 @@ def render_pdf_preview(file_path):
     if os.path.exists(file_path):
         with open(file_path, "rb") as f:
             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="650px" type="application/pdf"></iframe>'
+        # 改用 <object> 標籤提升相容性
+        pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="650px"><p>您的瀏覽器不支援內嵌 PDF 預覽，請使用下方下載按鈕。</p></object>'
         st.markdown(pdf_display, unsafe_allow_html=True)
+        
+        # 額外提供下載按鈕以防萬一
+        with open(file_path, "rb") as f:
+            st.download_button(
+                label="📥 下載此 PDF 檔案查看",
+                data=f.read(),
+                file_path=file_path,
+                file_name=os.path.basename(file_path),
+                mime="application/pdf"
+            )
     else:
-        st.error("找不到對應的 PDF 檔案。")
+        st.error(f"找不到對應的 PDF 檔案：{file_path}")
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
