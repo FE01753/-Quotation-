@@ -6,7 +6,6 @@ import re
 from datetime import datetime
 import urllib.parse
 
-# 嘗試引入 PDF 讀取工具
 try:
     import pypdf
     PDF_SUPPORT = True
@@ -82,7 +81,7 @@ def smart_analyze_pdf(filename, text):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊展開即時管理、下載、傳送或批量刪除！")
+st.write("批量上傳 PDF，透過互動表格輕鬆勾選刪除或展開檢視！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -189,7 +188,7 @@ with tab1:
                 st.info(f"🔄 偵測到 {replaced_count} 個重複檔案，已自動完成**取代與更新**：\n- " + "\n- ".join(replaced_files))
 
 # ==========================================
-# Tab 2: 智能檢視、預覽與管理
+# Tab 2: 智能檢視、預覽與管理 (採用 DataFrame 批量勾選)
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -205,36 +204,62 @@ with tab2:
             filtered_data = [item for item in db_data if search_kw.lower() in item['original_filename'].lower()]
 
         st.markdown("---")
-        
+
         if filtered_data:
-            # 用 callback 處理全選連動
-            def toggle_select_all():
-                select_state = st.session_state.select_all_toggle
-                for item in filtered_data:
-                    st.session_state[f"chk_{item['id']}"] = select_state
-
-            st.checkbox("☑️ 全選目前顯示的檔案", key="select_all_toggle", on_change=toggle_select_all)
-            st.markdown("<br>", unsafe_allow_html=True)
-
-        selected_ids = []
-
-        # 逐個以 Expander 方式展示檔案
-        for item in filtered_data:
-            file_path = os.path.join(PDF_DIR, item['filename'])
+            st.write("💡 **勾選下方表格嘅「刪除」欄位，然後按下方按鈕即可實現批量刪除！**")
             
-            col_chk, col_ex, col_del = st.columns([0.6, 8.4, 1])
+            # 建立 DataFrame 專畀互動表格
+            df_display = []
+            for item in filtered_data:
+                df_display.append({
+                    "刪除": False,
+                    "ID": item['id'],
+                    "檔名": item['original_filename'],
+                    "公司": item.get('client_company', '未分類'),
+                    "金額": item.get('amount', '未偵測')
+                })
             
-            with col_chk:
-                # 確保每個 checkbox 都有預設值
-                chk_key = f"chk_{item['id']}"
-                if chk_key not in st.session_state:
-                    st.session_state[chk_key] = False
+            df_editable = pd.DataFrame(df_display)
+            
+            # 呈現互動編輯表格
+            edited_df = st.data_editor(
+                df_editable,
+                column_config={
+                    "刪除": st.column_config.CheckboxColumn("刪除？", default=False),
+                    "ID": st.column_config.NumberColumn("ID", disabled=True),
+                    "檔名": st.column_config.TextColumn("檔案名稱", disabled=True),
+                    "公司": st.column_config.TextColumn("公司名稱", disabled=True),
+                    "金額": st.column_config.TextColumn("金額", disabled=True),
+                },
+                hide_index=True,
+                key="quotation_table_editor"
+            )
+            
+            # 取得被勾選刪除的 ID
+            selected_to_delete = edited_df[edited_df["刪除"] == True]["ID"].tolist()
+            
+            if selected_to_delete:
+                if st.button(f"🗑️ 確認刪除已勾選嘅 {len(selected_to_delete)} 個檔案", type="primary"):
+                    db_data_updated = []
+                    for item in db_data:
+                        if item['id'] in selected_to_delete:
+                            target_path = os.path.join(PDF_DIR, item['filename'])
+                            if os.path.exists(target_path):
+                                os.remove(target_path)
+                        else:
+                            db_data_updated.append(item)
                     
-                is_checked = st.checkbox("", key=chk_key)
-                if is_checked:
-                    selected_ids.append(item['id'])
-                    
-            with col_ex:
+                    save_db(db_data_updated)
+                    st.success(f"🎉 成功刪除 {len(selected_to_delete)} 個檔案！")
+                    st.rerun()
+
+            st.markdown("---")
+            st.subheader("📄 檔案快速預覽、下載與 WhatsApp 傳送")
+            
+            # 獨立檔案展開檢視區
+            for item in filtered_data:
+                file_path = os.path.join(PDF_DIR, item['filename'])
+                
                 with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']}"):
                     if os.path.exists(file_path):
                         with open(file_path, "rb") as f:
@@ -249,7 +274,7 @@ with tab2:
                                 data=pdf_bytes,
                                 file_name=item['original_filename'],
                                 mime="application/pdf",
-                                key=f"exp_dl_{item['id']}"
+                                key=f"dl_{item['id']}"
                             )
                         with col_btn2:
                             share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
@@ -265,36 +290,6 @@ with tab2:
                                 st.text(item['extracted_text'][:1000] + ("..." if len(item.get('extracted_text', '')) > 1000 else ""))
                     else:
                         st.error("找不到對應的 PDF 檔案。")
-                        
-            with col_del:
-                st.write("")
-                if st.button("🗑️ Del", key=f"del_{item['id']}"):
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    
-                    db_data = [d for d in db_data if d["id"] != item["id"]]
-                    save_db(db_data)
-                    
-                    st.success(f"已刪除：{item['original_filename']}")
-                    st.rerun()
-
-        # --- 批量刪除執行按鈕 ---
-        if filtered_data:
-            st.markdown("---")
-            if selected_ids:
-                if st.button(f"🗑️ 批量刪除已選取的 {len(selected_ids)} 個檔案", type="primary"):
-                    db_data_updated = []
-                    for item in db_data:
-                        if item['id'] in selected_ids:
-                            target_path = os.path.join(PDF_DIR, item['filename'])
-                            if os.path.exists(target_path):
-                                os.remove(target_path)
-                        else:
-                            db_data_updated.append(item)
-                    
-                    save_db(db_data_updated)
-                    st.success(f"🎉 成功批量刪除 {len(selected_ids)} 個檔案！")
-                    st.rerun()
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
