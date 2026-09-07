@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-import base64
 import re
 from datetime import datetime
 import urllib.parse
@@ -83,7 +82,7 @@ def smart_analyze_pdf(filename, text):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊按鈕即時彈出選單，直接在頁面內預覽、下載或傳送！")
+st.write("批量上傳 PDF，點擊展開即時管理、下載或傳送！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -207,74 +206,56 @@ with tab2:
 
         st.markdown("---")
         
-        # 移除日期欄位後的表頭 (ID, Original Filename, 操作)
-        col_h1, col_h2, col_h3 = st.columns([1, 8, 2])
-        col_h1.markdown("**ID**")
-        col_h2.markdown("**Original Filename (點擊彈出操作與即時預覽選單)**")
-        col_h3.markdown("**操作**")
-        st.markdown("---")
-        
+        # 逐個以 Expander（展開面板）方式展示檔案，兼具標題、直接開啟按鈕同刪除掣
         for item in filtered_data:
-            c1, c2, c3 = st.columns([1, 8, 2])
-            c1.write(str(item['id']))
+            file_path = os.path.join(PDF_DIR, item['filename'])
             
-            # 使用 st.popover 彈出選單
-            with c2:
-                with st.popover(f"📄 {item['original_filename']}"):
-                    st.markdown(f"### 📄 檔案管理選項")
-                    st.write(f"**檔名：** {item['original_filename']}")
-                    st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
-                    
-                    file_path = os.path.join(PDF_DIR, item['filename'])
+            col_ex, col_del = st.columns([9, 1])
+            
+            with col_ex:
+                with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']}"):
                     if os.path.exists(file_path):
                         with open(file_path, "rb") as f:
                             pdf_bytes = f.read()
                             
-                        # 1. 內嵌即時預覽 (Base64 iframe) - 唔使下載直接睇
-                        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-                        pdf_data_url = f"data:application/pdf;base64,{base64_pdf}"
+                        st.info("💡 貼士：點擊下方按鈕即可在瀏覽器新分頁完美開啟 PDF 閱讀（避開 Chrome 內嵌黑屏限制）。")
                         
-                        st.markdown("**👁️ 頁面內即時預覽：**")
-                        st.markdown(
-                            f'<iframe src="{pdf_data_url}" width="100%" height="450px" style="border: 1px solid #ccc; border-radius: 4px;"></iframe>',
-                            unsafe_allow_html=True
-                        )
-                        
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        
-                        # 2. 下載按鈕
-                        st.download_button(
-                            label="📥 下載此 PDF 檔案",
-                            data=pdf_bytes,
-                            file_name=item['original_filename'],
-                            mime="application/pdf",
-                            key=f"popover_dl_{item['id']}"
-                        )
-                        
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        
-                        # 3. WhatsApp 傳送按鈕
-                        share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
-                        encoded_share_text = urllib.parse.quote(share_text)
-                        whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
-                        st.markdown(
-                            f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 14px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送給同事</button></a>',
-                            unsafe_allow_html=True
-                        )
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            st.download_button(
+                                label="📥 立即開啟 / 下載 PDF 檔案",
+                                data=pdf_bytes,
+                                file_name=item['original_filename'],
+                                mime="application/pdf",
+                                key=f"exp_dl_{item['id']}"
+                            )
+                        with col_btn2:
+                            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
+                            encoded_share_text = urllib.parse.quote(share_text)
+                            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+                            st.markdown(
+                                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 14px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送</button></a>',
+                                unsafe_allow_html=True
+                            )
+                            
+                        # 順便展示 PDF 智能萃取嘅部分文字內容作參考
+                        if item.get('extracted_text'):
+                            with st.expander("🔍 檢視 PDF 智能萃取文字內容"):
+                                st.text(item['extracted_text'][:1000] + ("..." if len(item.get('extracted_text', '')) > 1000 else ""))
                     else:
                         st.error("找不到對應的 PDF 檔案。")
-                
-            # 直接在檔名後面設刪除按鈕
-            if c3.button("🗑️ Del", key=f"del_{item['id']}"):
-                f_path = os.path.join(PDF_DIR, item['filename'])
-                if os.path.exists(f_path):
-                    os.remove(f_path)
-                
-                db_data = [d for d in db_data if d["id"] != item["id"]]
-                save_db(db_data)
-                
-                st.success(f"已成功刪除：{item['original_filename']}")
-                st.rerun()
+                        
+            with col_del:
+                st.write("") # 對齊排版
+                if st.button("🗑️ Del", key=f"del_{item['id']}"):
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    
+                    db_data = [d for d in db_data if d["id"] != item["id"]]
+                    save_db(db_data)
+                    
+                    st.success(f"已刪除：{item['original_filename']}")
+                    st.rerun()
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
