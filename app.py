@@ -123,22 +123,19 @@ def parse_pdf_content(file_path, original_name):
         if len(extracted_desc) > 90:
             extracted_desc = extracted_desc[:87] + "..."
 
-        # 2. 更強大嘅 Total Amount 捕捉邏輯（從尾段倒轉搵）
+        # 2. Total Amount 捕捉邏輯
         for line in reversed(lines):
             if any(kw in line.lower() for kw in ["total", "amount", "hkd", "$", "sum", "grand"]):
-                # 嘗試搵形如 25,000.00 或 25000.00
                 amounts = re.findall(r'[\$\s]*([\d,]+\.\d{2})', line)
                 if amounts:
                     extracted_amount = f"HKD {amounts[-1]}"
                     break
                 else:
-                    # 嘗試搵冇小數點但有逗號或純數字金額（大過1000）
                     amounts_int = re.findall(r'[\$\s]*([\d,]{4,})', line)
                     if amounts_int:
                         extracted_amount = f"HKD {amounts_int[-1]}"
                         break
 
-        # 假如由關鍵字行搵唔到，試吓喺最後 5 行直接搵銀碼格式
         if extracted_amount == "未偵測金額":
             for line in reversed(lines[-10:]):
                 amounts = re.findall(r'([\d,]+\.\d{2})', line)
@@ -249,17 +246,32 @@ with tab1:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（強力自動修復與無逗號 Smart Search）
+# Tab 2: 統一整合列表（含資料庫容量面板）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
     
     db_data = load_db()
 
+    # --- 計算並顯示系統容量數據 ---
+    db_file_size = os.path.getsize(DB_FILE) / 1024 if os.path.exists(DB_FILE) else 0  # KB
+    pdf_count = len(db_data)
+    
+    total_pdf_size = sum(os.path.getsize(os.path.join(PDF_DIR, f)) for f in os.listdir(PDF_DIR) if os.path.isfile(os.path.join(PDF_DIR, f))) / (1024 * 1024) if os.path.exists(PDF_DIR) else 0 # MB
+    total_thumb_size = sum(os.path.getsize(os.path.join(THUMB_DIR, f)) for f in os.listdir(THUMB_DIR) if os.path.isfile(os.path.join(THUMB_DIR, f))) / 1024 if os.path.exists(THUMB_DIR) else 0 # KB
+
+    with st.expander("📊 系統存儲狀態（Database & Storage Info）", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        c1.metric("📦 紀錄總數", f"{pdf_count} 個")
+        c2.metric("📄 JSON 數據大小", f"{db_file_size:.2f} KB")
+        c3.metric("📁 PDF 總容量", f"{total_pdf_size:.2f} MB")
+    
+    st.markdown("---")
+
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
     else:
-        # 強力自動修復舊紀錄：如果金額係未偵測或者格式有問題，立即重新掃描 PDF
+        # 強力自動修復舊紀錄
         db_updated_flag = False
         for item in db_data:
             current_desc = item.get('client_company', '')
@@ -283,7 +295,6 @@ with tab2:
         
         filtered_data = db_data
         if search_kw:
-            # 將用家輸入嘅關鍵字同金額裏面嘅逗號、空格全部洗走，實現「無視逗號」極速對應
             clean_search_kw = search_kw.replace(",", "").replace(" ", "").lower()
             
             filtered_data = []
