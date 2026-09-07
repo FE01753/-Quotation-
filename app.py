@@ -212,15 +212,14 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（專案名稱、檔名）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（檔名）：", value="")
         if search_kw:
             df_pdf = df_pdf[
-                df_pdf['project_name'].str.contains(search_kw, case=False, na=False) |
                 df_pdf['original_filename'].str.contains(search_kw, case=False, na=False)
             ]
 
-        # 已取消顯示 client_company, attention_name 及 amount 欄位
-        display_df = df_pdf[['id', 'date', 'project_name', 'original_filename']]
+        # 僅保留 id, date, original_filename 欄位，徹底移除 project_name 等其他欄位
+        display_df = df_pdf[['id', 'date', 'original_filename']]
         
         st.write("👇 **請點選你想預覽的記錄行：**")
         event = st.dataframe(
