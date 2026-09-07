@@ -212,16 +212,15 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（專案名稱、檔名、金額）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（專案名稱、檔名）：", value="")
         if search_kw:
             df_pdf = df_pdf[
                 df_pdf['project_name'].str.contains(search_kw, case=False, na=False) |
-                df_pdf['original_filename'].str.contains(search_kw, case=False, na=False) |
-                df_pdf['amount'].str.contains(search_kw, case=False, na=False)
+                df_pdf['original_filename'].str.contains(search_kw, case=False, na=False)
             ]
 
-        # 已取消顯示 client_company 及 attention_name 欄位
-        display_df = df_pdf[['id', 'date', 'project_name', 'amount', 'original_filename']]
+        # 已取消顯示 client_company, attention_name 及 amount 欄位
+        display_df = df_pdf[['id', 'date', 'project_name', 'original_filename']]
         
         st.write("👇 **請點選你想預覽的記錄行：**")
         event = st.dataframe(
@@ -239,15 +238,14 @@ with tab2:
             
             st.markdown("---")
             st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
-            st.markdown(f"**金額：** {selected_record['amount']}")
             
             # --- WhatsApp 快速分享按鈕 ---
-            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 金額: {selected_record['amount']}"
+            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}"
             encoded_share_text = urllib.parse.quote(share_text)
             whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
             
             st.markdown(
-                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送摘要比同事</button></a>',
+                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送檔案比同事</button></a>',
                 unsafe_allow_html=True
             )
             st.markdown("<br>", unsafe_allow_html=True)
