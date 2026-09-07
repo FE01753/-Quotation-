@@ -92,7 +92,7 @@ def render_pdf_preview(file_path):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊表格即時預覽、刪除及 WhatsApp 分享！")
+st.write("批量上傳 PDF，點擊檔案名稱即時預覽，或直接按 Del 刪除！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -203,75 +203,72 @@ with tab1:
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
-    st.write("點選下方表格中的項目即可即時預覽。如需刪除或分享，請利用下方的工具列。")
-
+    
     db_data = load_db()
 
     if not db_data:
         st.info("暫無 Quotation 紀錄，請先上載 PDF。")
     else:
-        df_pdf = pd.DataFrame(db_data)
-        
         search_kw = st.text_input("🔍 自由關鍵字搜尋（檔名）：", value="")
+        filtered_data = db_data
         if search_kw:
-            df_pdf = df_pdf[
-                df_pdf['original_filename'].str.contains(search_kw, case=False, na=False)
-            ]
+            filtered_data = [item for item in db_data if search_kw.lower() in item['original_filename'].lower()]
 
-        # 僅保留 id, date, original_filename 欄位，徹底移除 project_name 等其他欄位
-        display_df = df_pdf[['id', 'date', 'original_filename']]
+        st.markdown("---")
         
-        st.write("👇 **請點選你想預覽的記錄行：**")
-        event = st.dataframe(
-            display_df,
-            use_container_width=True,
-            selection_mode="single-row",
-            on_select="rerun"
-        )
+        # 表頭
+        col_h1, col_h2, col_h3, col_h4 = st.columns([1, 2, 7, 2])
+        col_h1.markdown("**ID**")
+        col_h2.markdown("**日期**")
+        col_h3.markdown("**Original Filename (點擊預覽)**")
+        col_h4.markdown("**操作**")
+        st.markdown("---")
         
-        selected_rows = event.selection.get("rows", [])
-        
-        if selected_rows:
-            selected_index = selected_rows[0]
-            selected_record = df_pdf.iloc[selected_index]
+        for item in filtered_data:
+            c1, c2, c3, c4 = st.columns([1, 2, 7, 2])
+            c1.write(str(item['id']))
+            c2.write(item['date'])
             
-            st.markdown("---")
-            st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
-            
-            # --- WhatsApp 快速分享按鈕 ---
-            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}"
-            encoded_share_text = urllib.parse.quote(share_text)
-            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
-            
-            st.markdown(
-                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送檔案比同事</button></a>',
-                unsafe_allow_html=True
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            file_path = os.path.join(PDF_DIR, selected_record['filename'])
-            render_pdf_preview(file_path)
+            # 點擊檔名按鈕作預覽觸發
+            if c3.button(item['original_filename'], key=f"preview_{item['id']}"):
+                st.session_state['preview_id'] = item['id']
+                
+            # 直接在檔名後面設刪除按鈕
+            if c4.button("🗑️ Del", key=f"del_{item['id']}"):
+                f_path = os.path.join(PDF_DIR, item['filename'])
+                if os.path.exists(f_path):
+                    os.remove(f_path)
+                
+                db_data = [d for d in db_data if d["id"] != item["id"]]
+                save_db(db_data)
+                
+                if st.session_state.get('preview_id') == item['id']:
+                    st.session_state['preview_id'] = None
+                    
+                st.success(f"已成功刪除：{item['original_filename']}")
+                st.rerun()
 
-        st.divider()
-        
-        # --- 刪除檔案專區 ---
-        with st.expander("🗑️ 管理與刪除不需要的 Quotation 記錄"):
-            del_ids = [item['id'] for item in db_data]
-            target_del_id = st.selectbox("選擇要刪除的 Quotation ID：", options=[None] + del_ids)
-            
-            if target_del_id:
-                target_rec = next((item for item in db_data if item["id"] == target_del_id), None)
-                if target_rec:
-                    st.warning(f"準備刪除：`{target_rec['original_filename']}`")
-                    if st.button("⚠️ 確認永久刪除此記錄及實體 PDF", type="primary"):
-                        f_path = os.path.join(PDF_DIR, target_rec['filename'])
-                        if os.path.exists(f_path):
-                            os.remove(f_path)
-                        
-                        db_data = [item for item in db_data if item["id"] != target_del_id]
-                        save_db(db_data)
-                        st.success("成功刪除記錄！請重新整理頁面。")
-                        st.rerun()
+        # 預覽區塊
+        preview_id = st.session_state.get('preview_id')
+        if preview_id:
+            selected_record = next((item for item in db_data if item['id'] == preview_id), None)
+            if selected_record:
+                st.markdown("---")
+                st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
+                
+                # --- WhatsApp 快速分享按鈕 ---
+                share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}"
+                encoded_share_text = urllib.parse.quote(share_text)
+                whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+                
+                st.markdown(
+                    f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送檔案比同事</button></a>',
+                    unsafe_allow_html=True
+                )
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                file_path = os.path.join(PDF_DIR, selected_record['filename'])
+                render_pdf_preview(file_path)
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
