@@ -50,7 +50,6 @@ def save_db(data):
 
 # --- 智能分析 PDF 內文與檔名的函數 ---
 def smart_analyze_pdf(filename, text):
-    # 1. 自動偵測客戶/物業名稱
     client_keywords = ["Regent Hotel", "K11 Musea", "K11", "Regent", "MTR", "Link", "Airport", "Sands", "W Hotel"]
     detected_client = "其他 / 未分類"
     
@@ -60,7 +59,6 @@ def smart_analyze_pdf(filename, text):
             detected_client = kw
             break
             
-    # 2. 自動偵測工程系統種類 (E&M Category)
     if any(k in combined_str.lower() for k in ["fs", "fire", "消防", "sprinkler", "alarm", "afa"]):
         category = "Fire Services (FS)"
     elif any(k in combined_str.lower() for k in ["elv", "cctv", "security", "data", "network"]):
@@ -72,7 +70,6 @@ def smart_analyze_pdf(filename, text):
     else:
         category = "General E&M Works"
         
-    # 3. 嘗試自動捕捉金額
     amount_found = "未偵測"
     amount_patterns = [r"HK\$\s*[\d,]+\.?\d*", r"\$\s*[\d,]+\.?\d*", r"Total\s*:\s*[\d,]+\.?\d*"]
     for pattern in amount_patterns:
@@ -85,7 +82,7 @@ def smart_analyze_pdf(filename, text):
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
-st.write("批量上傳 PDF：系統會自動分析內文，自動幫你分類公司/客戶、工程系統與提取金額！")
+st.write("批量上傳 PDF：如發現相同檔名會自動進行**取代 (Overwrite)** 並更新內文與分類！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類檢視與搜尋"])
 
@@ -94,7 +91,7 @@ tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類檢�
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation PDF 檔案")
-    st.write("一次過選取多個 PDF，系統會自動在後台進行 OCR 內文分析與分類。")
+    st.write("一次過選取多個 PDF，系統會自動辨識新檔或取代現有同名檔案。")
 
     uploaded_pdfs = st.file_uploader("選擇多個 Quotation PDF 檔案", type=["pdf"], accept_multiple_files=True)
     
@@ -103,53 +100,104 @@ with tab1:
         
         if st.button("🚀 開始智能批量分析與歸檔", type="primary"):
             db_data = load_db()
+            
+            # 建立快速查找字典：{ original_filename: record_item }
+            existing_map = {item.get("original_filename"): item for item in db_data}
+            
             success_count = 0
+            replaced_count = 0
+            replaced_files = []
             
             for uploaded_pdf in uploaded_pdfs:
                 original_name = uploaded_pdf.name
-                new_id = (db_data[-1]["id"] + 1) if db_data else 1
-                filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
-                file_path = os.path.join(PDF_DIR, filename)
                 
-                # 儲存實體檔案
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_pdf.getbuffer())
+                # 檢查是否已存在相同檔名
+                if original_name in existing_map:
+                    # 取得舊紀錄作直接更新 (取代)
+                    record = existing_map[original_name]
+                    filename = record["filename"]
+                    file_path = os.path.join(PDF_DIR, filename)
                     
-                # 提取 PDF 文字
-                extracted_text = ""
-                if PDF_SUPPORT:
-                    try:
-                        reader = pypdf.PdfReader(file_path)
-                        for page in reader.pages:
-                            text = page.extract_text()
-                            if text:
-                                extracted_text += text + "\n"
-                    except Exception as e:
-                        extracted_text = f"無法讀取文字: {str(e)}"
+                    # 覆蓋實體檔案
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_pdf.getbuffer())
+                        
+                    # 重新提取 PDF 文字
+                    extracted_text = ""
+                    if PDF_SUPPORT:
+                        try:
+                            reader = pypdf.PdfReader(file_path)
+                            for page in reader.pages:
+                                text = page.extract_text()
+                                if text:
+                                    extracted_text += text + "\n"
+                        except Exception as e:
+                            extracted_text = f"無法讀取文字: {str(e)}"
+                    else:
+                        extracted_text = "未啟用 PDF 文字萃取套件"
+                    
+                    # 重新進行智能分析
+                    client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
+                    clean_project_name = os.path.splitext(original_name)[0]
+                    
+                    # 更新舊紀錄的數值
+                    record["date"] = str(datetime.today().date())
+                    record["project_name"] = clean_project_name
+                    record["client_name"] = client_name
+                    record["category"] = category
+                    record["amount"] = detected_amount
+                    record["extracted_text"] = extracted_text
+                    
+                    replaced_count += 1
+                    replaced_files.append(original_name)
+                    
                 else:
-                    extracted_text = "未啟用 PDF 文字萃取套件"
-                
-                # 執行智能分析
-                client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
-                clean_project_name = os.path.splitext(original_name)[0]
-                
-                new_record = {
-                    "id": new_id,
-                    "date": str(datetime.today().date()),
-                    "project_name": clean_project_name,
-                    "client_name": client_name,
-                    "category": category,
-                    "amount": detected_amount,
-                    "filename": filename,
-                    "original_filename": original_name,
-                    "extracted_text": extracted_text
-                }
-                
-                db_data.append(new_record)
-                success_count += 1
+                    # 全新檔案新增
+                    new_id = (db_data[-1]["id"] + 1) if db_data else 1
+                    filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
+                    file_path = os.path.join(PDF_DIR, filename)
+                    
+                    with open(file_path, "wb") as f:
+                        f.write(uploaded_pdf.getbuffer())
+                        
+                    extracted_text = ""
+                    if PDF_SUPPORT:
+                        try:
+                            reader = pypdf.PdfReader(file_path)
+                            for page in reader.pages:
+                                text = page.extract_text()
+                                if text:
+                                    extracted_text += text + "\n"
+                        except Exception as e:
+                            extracted_text = f"無法讀取文字: {str(e)}"
+                    else:
+                        extracted_text = "未啟用 PDF 文字萃取套件"
+                    
+                    client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
+                    clean_project_name = os.path.splitext(original_name)[0]
+                    
+                    new_record = {
+                        "id": new_id,
+                        "date": str(datetime.today().date()),
+                        "project_name": clean_project_name,
+                        "client_name": client_name,
+                        "category": category,
+                        "amount": detected_amount,
+                        "filename": filename,
+                        "original_filename": original_name,
+                        "extracted_text": extracted_text
+                    }
+                    
+                    db_data.append(new_record)
+                    existing_map[original_name] = new_record  # 避免同一次批量中有重複
+                    success_count += 1
                 
             save_db(db_data)
-            st.success(f"🎉 成功完成智能分析並歸檔 {success_count} 個 Quotation PDF 檔案！")
+            
+            if success_count > 0:
+                st.success(f"🎉 成功新增 {success_count} 個全新 Quotation PDF 檔案！")
+            if replaced_count > 0:
+                st.info(f"🔄 偵測到 {replaced_count} 個重複檔案，已自動完成**取代與更新**：\n- " + "\n- ".join(replaced_files))
 
 # ==========================================
 # Tab 2: 智能分類檢視與搜尋
@@ -165,7 +213,6 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        # 篩選器
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             all_clients = ["全部"] + list(df_pdf['client_name'].unique())
@@ -174,14 +221,12 @@ with tab2:
             all_cats = ["全部"] + list(df_pdf['category'].unique())
             selected_cat_filter = st.selectbox("⚙️ 按工程系統篩選：", options=all_cats)
             
-        # 套用篩選
         filtered_df = df_pdf.copy()
         if selected_client_filter != "全部":
             filtered_df = filtered_df[filtered_df['client_name'] == selected_client_filter]
         if selected_cat_filter != "全部":
             filtered_df = filtered_df[filtered_df['category'] == selected_cat_filter]
 
-        # 關鍵字搜尋欄
         search_kw = st.text_input("🔍 自由關鍵字搜尋（檔名、金額、內文細節）：", value="")
         if search_kw:
             filtered_df = filtered_df[
@@ -195,7 +240,6 @@ with tab2:
         display_df = filtered_df[['id', 'date', 'client_name', 'category', 'project_name', 'amount', 'original_filename']]
         st.dataframe(display_df, use_container_width=True)
         
-        # 選擇 ID 進行詳細檢視或下載
         valid_ids = list(filtered_df['id'])
         if valid_ids:
             selected_id = st.selectbox("選擇要檢視或下載嘅 Quotation ID：", options=[None] + valid_ids)
