@@ -4,9 +4,7 @@ import os
 import json
 import urllib.parse
 from datetime import datetime
-import base64
 
-# 嘗試引入 fitz (PyMuPDF) 用黎將 PDF 轉成預覽圖片
 try:
     import fitz  # PyMuPDF
     HAS_PYMUPDF = True
@@ -55,10 +53,26 @@ def save_db(data):
     except Exception as e:
         st.error(f"儲存資料庫失敗: {e}")
 
+# 快取圖片生成過程，大幅提升載入速度（避免重複運算）
+@st.cache_data
+def get_pdf_preview_image(file_path, mtime):
+    if not HAS_PYMUPDF or not os.path.exists(file_path):
+        return None
+    try:
+        doc = fitz.open(file_path)
+        page = doc[0]  # 第一頁
+        # DPI 設為 96 保持清晰同時檔案極輕，秒開無壓力
+        pix = page.get_pixmap(dpi=96)
+        img_bytes = pix.tobytes("png")
+        doc.close()
+        return img_bytes
+    except Exception:
+        return None
+
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，享受極速秒速歸檔與網頁內嵌圖片預覽！")
+st.write("批量上傳 PDF，享受極速快取預覽體驗！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -137,7 +151,7 @@ with tab1:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（網頁圖片預覽、下載、批量管理）
+# Tab 2: 統一整合列表（快取預覽、下載、批量管理）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -207,21 +221,17 @@ with tab2:
                             with open(file_path, "rb") as f:
                                 pdf_bytes = f.read()
                                 
-                            # 網頁即時預覽區域（免下載，直接看圖）
-                            st.markdown("👀 **網頁即時預覽（無需下載）：**")
+                            st.markdown("👀 **網頁即時預覽（快取加速中）：**")
                             
                             if HAS_PYMUPDF:
-                                try:
-                                    doc = fitz.open(file_path)
-                                    page = doc[0]  # 第一頁
-                                    pix = page.get_pixmap(dpi=150)  # 高清解像度
-                                    img_bytes = pix.tobytes("png")
-                                    st.image(img_bytes, caption=f"{item['original_filename']} (第 1 頁預覽)", use_container_width=True)
-                                    doc.close()
-                                except Exception as e:
-                                    st.warning(f"無法直接生成預覽圖片，請點擊下方按鈕下載或檢視。")
+                                file_mtime = os.path.getmtime(file_path)
+                                img_bytes = get_pdf_preview_image(file_path, file_mtime)
+                                if img_bytes:
+                                    st.image(img_bytes, caption=f"{item['original_filename']} (第 1 頁)", use_container_width=True)
+                                else:
+                                    st.warning("無法生成預覽圖片。")
                             else:
-                                st.info("💡 提示：如需開啟內嵌圖像預覽，請確保已安裝 `PyMuPDF`。你可以直接點擊下方按鈕下載。")
+                                st.info("💡 提示：請確保已安裝 PyMuPDF 套件。")
 
                             st.markdown("---")
                             
