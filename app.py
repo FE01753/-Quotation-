@@ -80,47 +80,10 @@ def smart_analyze_pdf(filename, text):
             
     return detected_client_company, detected_attention, amount_found
 
-# --- 定義彈出式預覽對話框 (Modal Dialog) ---
-@st.dialog("📄 PDF 檔案即時預覽", width="large")
-def show_pdf_dialog(record):
-    st.markdown(f"**檔名：** {record['original_filename']}")
-    
-    file_path = os.path.join(PDF_DIR, record['filename'])
-    if os.path.exists(file_path):
-        with open(file_path, "rb") as f:
-            pdf_bytes = f.read()
-            
-        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-        
-        # 內嵌預覽
-        pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="550px"><p>您的瀏覽器不支援內嵌 PDF 預覽，請使用下方下載按鈕。</p></object>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            st.download_button(
-                label="📥 下載此 PDF 檔案",
-                data=pdf_bytes,
-                file_name=record['original_filename'],
-                mime="application/pdf",
-                key=f"modal_dl_{record['id']}"
-            )
-        with col_d2:
-            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {record['original_filename']}"
-            encoded_share_text = urllib.parse.quote(share_text)
-            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
-            st.markdown(
-                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:6px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送</button></a>',
-                unsafe_allow_html=True
-            )
-    else:
-        st.error("找不到對應的 PDF 檔案。")
-
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊檔案名稱即彈出視窗預覽，或直接按 Del 刪除！")
+st.write("批量上傳 PDF，點擊按鈕即時彈出預覽視窗，或直接按 Del 刪除！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -257,9 +220,41 @@ with tab2:
             c1.write(str(item['id']))
             c2.write(item['date'])
             
-            # 點擊檔名按鈕直接彈出 Modal 預覽視窗
-            if c3.button(item['original_filename'], key=f"preview_modal_{item['id']}"):
-                show_pdf_dialog(item)
+            # 使用 Streamlit 內置 st.popover 做到完美彈出式預覽 (帶關閉功能)
+            with c3:
+                with st.popover(f"📄 {item['original_filename']}"):
+                    st.markdown(f"### 📄 檔案預覽")
+                    st.write(f"**檔名：** {item['original_filename']}")
+                    
+                    file_path = os.path.join(PDF_DIR, item['filename'])
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as f:
+                            pdf_bytes = f.read()
+                            
+                        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                        pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="450px"><p>您的瀏覽器不支援內嵌 PDF 預覽，請使用下方下載按鈕。</p></object>'
+                        st.markdown(pdf_display, unsafe_allow_html=True)
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        col_p1, col_p2 = st.columns(2)
+                        with col_p1:
+                            st.download_button(
+                                label="📥 下載 PDF",
+                                data=pdf_bytes,
+                                file_name=item['original_filename'],
+                                mime="application/pdf",
+                                key=f"popover_dl_{item['id']}"
+                            )
+                        with col_p2:
+                            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
+                            encoded_share_text = urllib.parse.quote(share_text)
+                            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+                            st.markdown(
+                                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:6px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp</button></a>',
+                                unsafe_allow_html=True
+                            )
+                    else:
+                        st.error("找不到對應的 PDF 檔案。")
                 
             # 直接在檔名後面設刪除按鈕
             if c4.button("🗑️ Del", key=f"del_{item['id']}"):
