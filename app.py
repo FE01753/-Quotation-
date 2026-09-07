@@ -70,7 +70,7 @@ def generate_thumbnail(pdf_path, thumb_path):
     except Exception:
         return False
 
-# 智能提取 PDF 內容與 Work Description (精準捕捉 Re: 標題)
+# 智能提取 PDF 內容與 Work Description (精準捕捉 Re:)
 def parse_pdf_content(file_path, original_name):
     is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT"])
     if is_drawing or not HAS_PYMUPDF:
@@ -86,22 +86,19 @@ def parse_pdf_content(file_path, original_name):
         extracted_desc = ""
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
         
-        # 1. 優先尋找 "Re:" 或 "SUBJECT:" 後面嘅字眼（工程 Quotation 最準確嘅 Work Description）
+        # 1. 優先尋找 "Re:" 或 "SUBJECT:" 後面嘅字眼
         for i, line in enumerate(lines):
             if line.lower().startswith("re:") or line.lower().startswith("subject:"):
-                # 提取 Re: 後面嘅內容
                 content = line.split(":", 1)[1].strip()
-                # 如果同一行已經有好長嘅描述
-                if len(content) > 5:
+                if len(content) > 3:
                     extracted_desc = content
-                    # 順便把下面連埋一齊嘅行（如果有換行）接埋落去
                     for next_line in lines[i+1 : i+3]:
                         if next_line.lower().startswith("as per") or next_line.lower().startswith("dear") or ":" in next_line:
                             break
                         extracted_desc += " " + next_line
                     break
 
-        # 2. 如果搵唔到 Re:，試尋找 "Dear Sir/Madam" 下面嘅字眼
+        # 2. 尋找 "Dear Sir/Madam" 下面嘅字眼
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "dear sir" in line.lower() or "madam" in line.lower():
@@ -110,7 +107,7 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc = " ".join(desc_candidates)
                         break
         
-        # 3. 如果都搵唔用，試 "Description"
+        # 3. 尋找 "Description"
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "description" in line.lower():
@@ -119,11 +116,9 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc = " ".join(desc_candidates)
                         break
 
-        # 4. Fallback 用檔名
         if not extracted_desc or len(extracted_desc) < 3:
             extracted_desc = clean_name_fallback(original_name)
 
-        # 限制長度避免太長
         if len(extracted_desc) > 90:
             extracted_desc = extracted_desc[:87] + "..."
 
@@ -139,7 +134,7 @@ def clean_name_fallback(name):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，精準捕捉 Re: Work Description，享受極速預覽！")
+st.write("批量上傳 PDF，自動捕捉 Re: Work Description，極速預覽與管理！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -229,7 +224,7 @@ with tab1:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（智能搜尋 Work Description）
+# Tab 2: 統一整合列表（自動修復舊紀錄）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -239,6 +234,22 @@ with tab2:
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
     else:
+        # 自動修復舊紀錄的 Description (如果是檔名或者未偵測，自動重新解析一次 PDF)
+        db_updated_flag = False
+        for item in db_data:
+            current_desc = item.get('client_company', '')
+            # 如果舊紀錄嘅 Description 同檔名一樣（代表以前未成功捉到 Re:），自動幫佢重新解析
+            if current_desc == os.path.splitext(item['original_filename'])[0] or current_desc == "未分類" or not current_desc:
+                file_path = os.path.join(PDF_DIR, item['filename'])
+                if os.path.exists(file_path):
+                    new_desc, _, _ = parse_pdf_content(file_path, item['original_filename'])
+                    if new_desc and new_desc != current_desc:
+                        item['client_company'] = new_desc
+                        db_updated_flag = True
+        
+        if db_updated_flag:
+            save_db(db_data)
+
         search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名或 Work Description）：", value="")
         filtered_data = db_data
         if search_kw:
