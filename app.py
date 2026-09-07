@@ -92,7 +92,7 @@ def render_pdf_preview(file_path):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF：自動識別公司，點擊表格即時預覽、刪除及 WhatsApp 分享！")
+st.write("批量上傳 PDF，點擊表格即時預覽、刪除及 WhatsApp 分享！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -212,16 +212,16 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（公司名稱、檔名、金額）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（專案名稱、檔名、金額）：", value="")
         if search_kw:
             df_pdf = df_pdf[
-                df_pdf['client_company'].str.contains(search_kw, case=False, na=False) |
+                df_pdf['project_name'].str.contains(search_kw, case=False, na=False) |
                 df_pdf['original_filename'].str.contains(search_kw, case=False, na=False) |
                 df_pdf['amount'].str.contains(search_kw, case=False, na=False)
             ]
 
-        # 已取消顯示 attention_name 欄位
-        display_df = df_pdf[['id', 'date', 'client_company', 'project_name', 'amount', 'original_filename']]
+        # 已取消顯示 client_company 及 attention_name 欄位
+        display_df = df_pdf[['id', 'date', 'project_name', 'amount', 'original_filename']]
         
         st.write("👇 **請點選你想預覽的記錄行：**")
         event = st.dataframe(
@@ -239,10 +239,10 @@ with tab2:
             
             st.markdown("---")
             st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
-            st.markdown(f"**公司：** {selected_record['client_company']} | **金額：** {selected_record['amount']}")
+            st.markdown(f"**金額：** {selected_record['amount']}")
             
             # --- WhatsApp 快速分享按鈕 ---
-            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- 金額: {selected_record['amount']}"
+            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 金額: {selected_record['amount']}"
             encoded_share_text = urllib.parse.quote(share_text)
             whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
             
@@ -265,7 +265,7 @@ with tab2:
             if target_del_id:
                 target_rec = next((item for item in db_data if item["id"] == target_del_id), None)
                 if target_rec:
-                    st.warning(f"準備刪除：`{target_rec['original_filename']}` (公司: {target_rec['client_company']})")
+                    st.warning(f"準備刪除：`{target_rec['original_filename']}`")
                     if st.button("⚠️ 確認永久刪除此記錄及實體 PDF", type="primary"):
                         f_path = os.path.join(PDF_DIR, target_rec['filename'])
                         if os.path.exists(f_path):
