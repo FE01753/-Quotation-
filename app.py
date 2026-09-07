@@ -206,25 +206,31 @@ with tab2:
 
         st.markdown("---")
         
-        # --- 批量刪除控制區 ---
         if filtered_data:
-            col_b1, col_b2 = st.columns([2, 4])
-            with col_b1:
-                select_all = st.checkbox("☑️ 全選目前顯示的檔案", key="select_all_checkbox")
-            
-            # 建立勾選狀態字典
-            selected_ids = []
+            # 用 callback 處理全選連動
+            def toggle_select_all():
+                select_state = st.session_state.select_all_toggle
+                for item in filtered_data:
+                    st.session_state[f"chk_{item['id']}"] = select_state
+
+            st.checkbox("☑️ 全選目前顯示的檔案", key="select_all_toggle", on_change=toggle_select_all)
             st.markdown("<br>", unsafe_allow_html=True)
 
-        # 逐個以 Expander 方式展示檔案，並加入批量勾選框
+        selected_ids = []
+
+        # 逐個以 Expander 方式展示檔案
         for item in filtered_data:
             file_path = os.path.join(PDF_DIR, item['filename'])
             
             col_chk, col_ex, col_del = st.columns([0.6, 8.4, 1])
             
             with col_chk:
-                # 勾選框
-                is_checked = st.checkbox("", value=select_all, key=f"chk_{item['id']}")
+                # 確保每個 checkbox 都有預設值
+                chk_key = f"chk_{item['id']}"
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = False
+                    
+                is_checked = st.checkbox("", key=chk_key)
                 if is_checked:
                     selected_ids.append(item['id'])
                     
@@ -254,7 +260,6 @@ with tab2:
                                 unsafe_allow_html=True
                             )
                             
-                        # 順便展示 PDF 智能萃取嘅部分文字內容作參考
                         if item.get('extracted_text'):
                             with st.expander("🔍 檢視 PDF 智能萃取文字內容"):
                                 st.text(item['extracted_text'][:1000] + ("..." if len(item.get('extracted_text', '')) > 1000 else ""))
@@ -262,7 +267,7 @@ with tab2:
                         st.error("找不到對應的 PDF 檔案。")
                         
             with col_del:
-                st.write("") # 對齊排版
+                st.write("")
                 if st.button("🗑️ Del", key=f"del_{item['id']}"):
                     if os.path.exists(file_path):
                         os.remove(file_path)
