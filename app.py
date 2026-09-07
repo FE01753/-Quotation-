@@ -81,7 +81,7 @@ def smart_analyze_pdf(filename, text):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，透過互動表格輕鬆勾選刪除或展開檢視！")
+st.write("批量上傳 PDF，享受流暢嘅統一檢視、下載與批量管理體驗！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -188,7 +188,7 @@ with tab1:
                 st.info(f"🔄 偵測到 {replaced_count} 個重複檔案，已自動完成**取代與更新**：\n- " + "\n- ".join(replaced_files))
 
 # ==========================================
-# Tab 2: 智能檢視、預覽與管理 (採用 DataFrame 批量勾選)
+# Tab 2: 統一整合列表（檢視、預覽、下載、批量管理）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -206,90 +206,95 @@ with tab2:
         st.markdown("---")
 
         if filtered_data:
-            st.write("💡 **勾選下方表格嘅「刪除」欄位，然後按下方按鈕即可實現批量刪除！**")
+            # 全選聯動 Callback
+            def toggle_all_checkboxes():
+                val = st.session_state.select_all_master
+                for item in filtered_data:
+                    st.session_state[f"chk_{item['id']}"] = val
+
+            col_top1, col_top2 = st.columns([3, 2])
+            with col_top1:
+                st.checkbox("☑️ 全選目前顯示的檔案", key="select_all_master", on_change=toggle_all_checkboxes)
             
-            # 建立 DataFrame 專畀互動表格
-            df_display = []
+            # 收集當前被剔選嘅 ID
+            selected_ids = []
             for item in filtered_data:
-                df_display.append({
-                    "刪除": False,
-                    "ID": item['id'],
-                    "檔名": item['original_filename'],
-                    "公司": item.get('client_company', '未分類'),
-                    "金額": item.get('amount', '未偵測')
-                })
-            
-            df_editable = pd.DataFrame(df_display)
-            
-            # 呈現互動編輯表格
-            edited_df = st.data_editor(
-                df_editable,
-                column_config={
-                    "刪除": st.column_config.CheckboxColumn("刪除？", default=False),
-                    "ID": st.column_config.NumberColumn("ID", disabled=True),
-                    "檔名": st.column_config.TextColumn("檔案名稱", disabled=True),
-                    "公司": st.column_config.TextColumn("公司名稱", disabled=True),
-                    "金額": st.column_config.TextColumn("金額", disabled=True),
-                },
-                hide_index=True,
-                key="quotation_table_editor"
-            )
-            
-            # 取得被勾選刪除的 ID
-            selected_to_delete = edited_df[edited_df["刪除"] == True]["ID"].tolist()
-            
-            if selected_to_delete:
-                if st.button(f"🗑️ 確認刪除已勾選嘅 {len(selected_to_delete)} 個檔案", type="primary"):
-                    db_data_updated = []
-                    for item in db_data:
-                        if item['id'] in selected_to_delete:
-                            target_path = os.path.join(PDF_DIR, item['filename'])
-                            if os.path.exists(target_path):
-                                os.remove(target_path)
-                        else:
-                            db_data_updated.append(item)
-                    
-                    save_db(db_data_updated)
-                    st.success(f"🎉 成功刪除 {len(selected_to_delete)} 個檔案！")
-                    st.rerun()
+                chk_key = f"chk_{item['id']}"
+                if chk_key not in st.session_state:
+                    st.session_state[chk_key] = False
+                if st.session_state[chk_key]:
+                    selected_ids.append(item['id'])
+
+            with col_top2:
+                if selected_ids:
+                    if st.button(f"🗑️ 刪除已選取嘅 {len(selected_ids)} 個檔案", type="primary", use_container_width=True):
+                        db_data_updated = []
+                        for item in db_data:
+                            if item['id'] in selected_ids:
+                                target_path = os.path.join(PDF_DIR, item['filename'])
+                                if os.path.exists(target_path):
+                                    os.remove(target_path)
+                            else:
+                                db_data_updated.append(item)
+                        
+                        save_db(db_data_updated)
+                        # 重設狀態
+                        for item in filtered_data:
+                            st.session_state[f"chk_{item['id']}"] = False
+                        st.success(f"🎉 成功刪除 {len(selected_ids)} 個檔案！")
+                        st.rerun()
 
             st.markdown("---")
-            st.subheader("📄 檔案快速預覽、下載與 WhatsApp 傳送")
-            
-            # 獨立檔案展開檢視區
+
+            # --- 統一整合列表：每一行左邊剔checkbox，右邊即係 Expander ---
             for item in filtered_data:
                 file_path = os.path.join(PDF_DIR, item['filename'])
                 
-                with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']}"):
-                    if os.path.exists(file_path):
-                        with open(file_path, "rb") as f:
-                            pdf_bytes = f.read()
+                col_chk, col_exp = st.columns([0.6, 9.4])
+                
+                with col_chk:
+                    st.write("") # 微調對齊
+                    st.checkbox("", key=f"chk_{item['id']}", label_visibility="collapsed")
+                    
+                with col_exp:
+                    with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']} | 公司: {item.get('client_company', '未分類')}"):
+                        if os.path.exists(file_path):
+                            with open(file_path, "rb") as f:
+                                pdf_bytes = f.read()
+                                
+                            st.info("💡 貼士：點擊下方按鈕即可在瀏覽器新分頁完美開啟 PDF 閱讀（避開 Chrome 內嵌黑屏限制）。")
                             
-                        st.info("💡 貼士：點擊下方按鈕即可在瀏覽器新分頁完美開啟 PDF 閱讀（避開 Chrome 內嵌黑屏限制）。")
-                        
-                        col_btn1, col_btn2 = st.columns(2)
-                        with col_btn1:
-                            st.download_button(
-                                label="📥 立即開啟 / 下載 PDF 檔案",
-                                data=pdf_bytes,
-                                file_name=item['original_filename'],
-                                mime="application/pdf",
-                                key=f"dl_{item['id']}"
-                            )
-                        with col_btn2:
-                            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
-                            encoded_share_text = urllib.parse.quote(share_text)
-                            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
-                            st.markdown(
-                                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 14px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送</button></a>',
-                                unsafe_allow_html=True
-                            )
-                            
-                        if item.get('extracted_text'):
-                            with st.expander("🔍 檢視 PDF 智能萃取文字內容"):
-                                st.text(item['extracted_text'][:1000] + ("..." if len(item.get('extracted_text', '')) > 1000 else ""))
-                    else:
-                        st.error("找不到對應的 PDF 檔案。")
+                            col_btn1, col_btn2, col_btn3 = st.columns([3, 3, 1.5])
+                            with col_btn1:
+                                st.download_button(
+                                    label="📥 下載 PDF",
+                                    data=pdf_bytes,
+                                    file_name=item['original_filename'],
+                                    mime="application/pdf",
+                                    key=f"dl_{item['id']}"
+                                )
+                            with col_btn2:
+                                share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
+                                encoded_share_text = urllib.parse.quote(share_text)
+                                whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+                                st.markdown(
+                                    f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:6px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送</button></a>',
+                                    unsafe_allow_html=True
+                                )
+                            with col_btn3:
+                                if st.button("🗑️ 刪除", key=f"single_del_{item['id']}"):
+                                    if os.path.exists(file_path):
+                                        os.remove(file_path)
+                                    db_data = [d for d in db_data if d["id"] != item["id"]]
+                                    save_db(db_data)
+                                    st.success(f"已刪除：{item['original_filename']}")
+                                    st.rerun()
+                                
+                            if item.get('extracted_text'):
+                                with st.expander("🔍 檢視 PDF 智能萃取文字內容"):
+                                    st.text(item['extracted_text'][:1000] + ("..." if len(item.get('extracted_text', '')) > 1000 else ""))
+                        else:
+                            st.error("找不到對應的 PDF 檔案。")
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
