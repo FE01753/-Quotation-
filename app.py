@@ -4,6 +4,7 @@ import os
 import json
 import urllib.parse
 from datetime import datetime
+import re
 
 try:
     import fitz  # PyMuPDF
@@ -70,11 +71,11 @@ def generate_thumbnail(pdf_path, thumb_path):
     except Exception:
         return False
 
-# 智能提取 PDF 內容與 Work Description (精準捕捉 Re:)
+# 智能提取 PDF 內容、Work Description 與 Total Amount
 def parse_pdf_content(file_path, original_name):
     is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT"])
     if is_drawing or not HAS_PYMUPDF:
-        return "圖則/未分類", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF。"
+        return "圖則/未分類", "N/A", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF。"
 
     try:
         doc = fitz.open(file_path)
@@ -84,9 +85,11 @@ def parse_pdf_content(file_path, original_name):
         doc.close()
 
         extracted_desc = ""
+        extracted_amount = "未偵測金額"
+        
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
         
-        # 1. 優先尋找 "Re:" 或 "SUBJECT:" 後面嘅字眼
+        # 1. 尋找 Re: 或 Subject: 作為 Work Description
         for i, line in enumerate(lines):
             if line.lower().startswith("re:") or line.lower().startswith("subject:"):
                 content = line.split(":", 1)[1].strip()
@@ -98,7 +101,6 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc += " " + next_line
                     break
 
-        # 2. 尋找 "Dear Sir/Madam" 下面嘅字眼
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "dear sir" in line.lower() or "madam" in line.lower():
@@ -107,7 +109,6 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc = " ".join(desc_candidates)
                         break
         
-        # 3. 尋找 "Description"
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "description" in line.lower():
@@ -122,10 +123,25 @@ def parse_pdf_content(file_path, original_name):
         if len(extracted_desc) > 90:
             extracted_desc = extracted_desc[:87] + "..."
 
-        return extracted_desc, extracted_desc, full_text[:500]
+        # 2. 智能提取 Total Amount (通常喺尾段搵 "TOTAL" 或者 "$" 符號)
+        for line in reversed(lines):
+            if "total" in line.lower() or "hkd" in line.lower() or "$" in line:
+                # 用正则去搵銀碼格式 (例如 38,000.00 或 1,200,000)
+                amounts = re.findall(r'[\$\s]*([\d,]+\.\d{2})', line)
+                if amounts:
+                    extracted_amount = f"HKD {amounts[-1]}"
+                    break
+                else:
+                    # 試吓搵冇小數位但有逗號嘅銀碼
+                    amounts_int = re.findall(r'[\$\s]*([\d,]{4,})', line)
+                    if amounts_int:
+                        extracted_amount = f"HKD {amounts_int[-1]}"
+                        break
+
+        return extracted_desc, extracted_amount, extracted_desc, full_text[:500]
 
     except Exception:
-        return clean_name_fallback(original_name), clean_name_fallback(original_name), "解析失敗"
+        return clean_name_fallback(original_name), "未偵測金額", clean_name_fallback(original_name), "解析失敗"
 
 def clean_name_fallback(name):
     base = os.path.splitext(name)[0]
@@ -134,7 +150,7 @@ def clean_name_fallback(name):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，自動捕捉 Re: Work Description，極速預覽與管理！")
+st.write("批量上傳 PDF，自動捕捉 Work Description 與 Total Amount，老細睇數最方便！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -168,7 +184,7 @@ with tab1:
                 with open(temp_save_path, "wb") as f:
                     f.write(uploaded_pdf.getbuffer())
 
-                work_desc, project_name, extracted_text = parse_pdf_content(temp_save_path, original_name)
+                work_desc, total_amount, project_name, extracted_text = parse_pdf_content(temp_save_path, original_name)
 
                 if original_name in existing_map:
                     record = existing_map[original_name]
@@ -184,6 +200,7 @@ with tab1:
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = project_name
                     record["client_company"] = work_desc
+                    record["amount"] = total_amount  # 更新 Total Amount
                     record["thumb_filename"] = thumb_filename
                     replaced_count += 1
                 else:
@@ -203,7 +220,7 @@ with tab1:
                         "project_name": project_name,
                         "client_company": work_desc,
                         "attention_name": "未偵測",
-                        "amount": "未偵測",
+                        "amount": total_amount,  # 自動捕捉嘅 Total Amount
                         "filename": filename,
                         "original_filename": original_name,
                         "thumb_filename": thumb_filename,
@@ -219,12 +236,12 @@ with tab1:
             progress_bar.empty()
             
             if success_count > 0:
-                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案！")
+                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案，已自動捕捉金額！")
             if replaced_count > 0:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（自動修復舊紀錄）
+# Tab 2: 統一整合列表（自動修復舊紀錄與顯示金額）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -234,28 +251,34 @@ with tab2:
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
     else:
-        # 自動修復舊紀錄的 Description (如果是檔名或者未偵測，自動重新解析一次 PDF)
+        # 自動修復舊紀錄的 Description 或 Amount
         db_updated_flag = False
         for item in db_data:
             current_desc = item.get('client_company', '')
-            # 如果舊紀錄嘅 Description 同檔名一樣（代表以前未成功捉到 Re:），自動幫佢重新解析
-            if current_desc == os.path.splitext(item['original_filename'])[0] or current_desc == "未分類" or not current_desc:
+            current_amount = item.get('amount', '未偵測金額')
+            
+            if current_desc == os.path.splitext(item['original_filename'])[0] or current_desc == "未分類" or not current_desc or current_amount == "未偵測" or current_amount == "未偵測金額":
                 file_path = os.path.join(PDF_DIR, item['filename'])
                 if os.path.exists(file_path):
-                    new_desc, _, _ = parse_pdf_content(file_path, item['original_filename'])
+                    new_desc, new_amt, _, _ = parse_pdf_content(file_path, item['original_filename'])
                     if new_desc and new_desc != current_desc:
                         item['client_company'] = new_desc
+                        db_updated_flag = True
+                    if new_amt and new_amt != "未偵測金額" and current_amount != new_amt:
+                        item['amount'] = new_amt
                         db_updated_flag = True
         
         if db_updated_flag:
             save_db(db_data)
 
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名或 Work Description）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名、Work Description 或 價錢金額）：", value="")
         filtered_data = db_data
         if search_kw:
             filtered_data = [
                 item for item in db_data 
-                if search_kw.lower() in item['original_filename'].lower() or search_kw.lower() in item.get('client_company', '').lower()
+                if search_kw.lower() in item['original_filename'].lower() or 
+                   search_kw.lower() in item.get('client_company', '').lower() or
+                   search_kw.lower() in str(item.get('amount', '')).lower()
             ]
 
         st.markdown("---")
@@ -313,11 +336,19 @@ with tab2:
                     
                 with col_exp:
                     work_desc_display = item.get('client_company', '未分類')
-                    with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']} | 🛠️ {work_desc_display}"):
+                    amount_display = item.get('amount', '未偵測金額')
+                    
+                    # 標題直接展示金額，老細一眼睇曬！
+                    expander_label = f"📄 [ID: {item['id']}] {item['original_filename']} | 💰 {amount_display}"
+                    
+                    with st.expander(expander_label):
                         if os.path.exists(file_path):
                             with open(file_path, "rb") as f:
                                 pdf_bytes = f.read()
                                 
+                            st.markdown(f"🛠️ **工程項目：** {work_desc_display}")
+                            st.markdown(f"💰 **Total Amount：** `{amount_display}`")
+                            st.markdown("---")
                             st.markdown("⚡ **網頁秒開預覽：**")
                             
                             thumb_file = item.get("thumb_filename")
@@ -331,7 +362,7 @@ with tab2:
                                 save_db(db_data)
 
                             if os.path.exists(thumb_path):
-                                st.image(thumb_path, caption=f"Work Description: {work_desc_display}", use_container_width=True)
+                                st.image(thumb_path, caption=f"Amount: {amount_display} | {work_desc_display}", use_container_width=True)
                             else:
                                 st.warning("無法顯示預覽圖。")
 
@@ -347,7 +378,7 @@ with tab2:
                                     key=f"dl_{item['id']}"
                                 )
                             with col_btn2:
-                                share_text = f"🛠️ E&M Work Description (Design by nikki 💅)：\n- 項目: {work_desc_display}\n- 檔名: {item['original_filename']}"
+                                share_text = f"🛠️ E&M Quotation (Design by nikki 💅)：\n- 項目: {work_desc_display}\n- 金額: {amount_display}\n- 檔名: {item['original_filename']}"
                                 encoded_share_text = urllib.parse.quote(share_text)
                                 whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
                                 st.markdown(
