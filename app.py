@@ -120,8 +120,8 @@ def parse_pdf_content(file_path, original_name):
         if not extracted_desc or len(extracted_desc) < 3:
             extracted_desc = clean_name_fallback(original_name)
 
-        if len(extracted_desc) > 90:
-            extracted_desc = extracted_desc[:87] + "..."
+        if len(extracted_desc) > 70:
+            extracted_desc = extracted_desc[:67] + "..."
 
         # 2. Total Amount 捕捉邏輯
         for line in reversed(lines):
@@ -352,7 +352,8 @@ with tab2:
                     work_desc_display = item.get('client_company', '未分類')
                     amount_display = item.get('amount', '未偵測金額')
                     
-                    expander_label = f"📄 [ID: {item['id']}] {item['original_filename']} | 💰 {amount_display}"
+                    # 調整順序：將 Work Description 直接顯示喺摺疊標題上面
+                    expander_label = f"📄 [ID: {item['id']}] {item['original_filename']} | 🛠️ {work_desc_display} | 💰 {amount_display}"
                     
                     with st.expander(expander_label):
                         if os.path.exists(file_path):
@@ -411,7 +412,7 @@ with tab2:
                         else:
                             st.error("找不到對應的 PDF 檔案。")
 
-# --- 計算數據並隱藏於頁面最底的超小水印 ---
+# --- 頁面最底極細水印與容量資訊 ---
 db_file_size = (os.path.getsize(DB_FILE) / 1024) if os.path.exists(DB_FILE) else 0  # KB
 pdf_count = len(db_data)
 total_pdf_size = sum(os.path.getsize(os.path.join(PDF_DIR, f)) for f in os.listdir(PDF_DIR) if os.path.isfile(os.path.join(PDF_DIR, f))) / (1024 * 1024) if os.path.exists(PDF_DIR) else 0 # MB
