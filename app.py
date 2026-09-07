@@ -41,7 +41,18 @@ def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                # 自動兼容舊資料格式，避免 KeyError
+                for item in data:
+                    if "client_company" not in item:
+                        item["client_company"] = item.get("client_name", "未分類公司")
+                    if "attention_name" not in item:
+                        item["attention_name"] = "未偵測"
+                    if "project_name" not in item:
+                        item["project_name"] = os.path.splitext(item.get("original_filename", "unknown"))[0]
+                    if "amount" not in item:
+                        item["amount"] = "未偵測"
+                return data
         except:
             return []
     return []
@@ -81,8 +92,9 @@ def render_pdf_preview(file_path):
     else:
         st.error("找不到對應的 PDF 檔案。")
 
-# --- App 標題與分頁 ---
+# --- App 標題與分頁 (加入 nikki 水印標記) ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
+st.caption("✨ System curated & Design by nikki 💅")
 st.write("批量上傳 PDF：自動識別公司與 Attention，點擊表格即時預覽、刪除及 WhatsApp 分享！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
@@ -233,7 +245,7 @@ with tab2:
             st.markdown(f"**公司：** {selected_record['client_company']} | **Attention：** {selected_record['attention_name']} | **金額：** {selected_record['amount']}")
             
             # --- WhatsApp 快速分享按鈕 ---
-            share_text = f"🛠️ E&M Quotation 參考分享：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- Attention: {selected_record['attention_name']}\n- 金額: {selected_record['amount']}"
+            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- Attention: {selected_record['attention_name']}\n- 金額: {selected_record['amount']}"
             encoded_share_text = urllib.parse.quote(share_text)
             whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
             
