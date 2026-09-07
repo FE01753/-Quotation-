@@ -123,16 +123,14 @@ def parse_pdf_content(file_path, original_name):
         if len(extracted_desc) > 90:
             extracted_desc = extracted_desc[:87] + "..."
 
-        # 2. 智能提取 Total Amount (通常喺尾段搵 "TOTAL" 或者 "$" 符號)
+        # 2. 智能提取 Total Amount
         for line in reversed(lines):
             if "total" in line.lower() or "hkd" in line.lower() or "$" in line:
-                # 用正则去搵銀碼格式 (例如 38,000.00 或 1,200,000)
                 amounts = re.findall(r'[\$\s]*([\d,]+\.\d{2})', line)
                 if amounts:
                     extracted_amount = f"HKD {amounts[-1]}"
                     break
                 else:
-                    # 試吓搵冇小數位但有逗號嘅銀碼
                     amounts_int = re.findall(r'[\$\s]*([\d,]{4,})', line)
                     if amounts_int:
                         extracted_amount = f"HKD {amounts_int[-1]}"
@@ -200,7 +198,7 @@ with tab1:
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = project_name
                     record["client_company"] = work_desc
-                    record["amount"] = total_amount  # 更新 Total Amount
+                    record["amount"] = total_amount
                     record["thumb_filename"] = thumb_filename
                     replaced_count += 1
                 else:
@@ -220,7 +218,7 @@ with tab1:
                         "project_name": project_name,
                         "client_company": work_desc,
                         "attention_name": "未偵測",
-                        "amount": total_amount,  # 自動捕捉嘅 Total Amount
+                        "amount": total_amount,
                         "filename": filename,
                         "original_filename": original_name,
                         "thumb_filename": thumb_filename,
@@ -236,12 +234,12 @@ with tab1:
             progress_bar.empty()
             
             if success_count > 0:
-                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案，已自動捕捉金額！")
+                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案！")
             if replaced_count > 0:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（自動修復舊紀錄與顯示金額）
+# Tab 2: 統一整合列表（無逗號 Smart Search）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -251,7 +249,6 @@ with tab2:
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
     else:
-        # 自動修復舊紀錄的 Description 或 Amount
         db_updated_flag = False
         for item in db_data:
             current_desc = item.get('client_company', '')
@@ -271,15 +268,25 @@ with tab2:
         if db_updated_flag:
             save_db(db_data)
 
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名、Work Description 或 價錢金額）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名、Work Description 或 價錢金額，如 25000）：", value="")
+        
         filtered_data = db_data
         if search_kw:
-            filtered_data = [
-                item for item in db_data 
-                if search_kw.lower() in item['original_filename'].lower() or 
-                   search_kw.lower() in item.get('client_company', '').lower() or
-                   search_kw.lower() in str(item.get('amount', '')).lower()
-            ]
+            # 將用家輸入嘅關鍵字同金額裏面嘅逗號全部洗走，實現「無視逗號」極速對應
+            clean_search_kw = search_kw.replace(",", "").replace(" ", "").lower()
+            
+            filtered_data = []
+            for item in db_data:
+                orig_name = item.get('original_filename', '').lower()
+                work_desc = item.get('client_company', '').lower()
+                raw_amount = str(item.get('amount', '')).lower()
+                clean_amount = raw_amount.replace(",", "").replace(" ", "")
+                
+                if (clean_search_kw in orig_name) or \
+                   (clean_search_kw in work_desc) or \
+                   (clean_search_kw in clean_amount) or \
+                   (search_kw.lower() in raw_amount):
+                    filtered_data.append(item)
 
         st.markdown("---")
 
@@ -338,7 +345,6 @@ with tab2:
                     work_desc_display = item.get('client_company', '未分類')
                     amount_display = item.get('amount', '未偵測金額')
                     
-                    # 標題直接展示金額，老細一眼睇曬！
                     expander_label = f"📄 [ID: {item['id']}] {item['original_filename']} | 💰 {amount_display}"
                     
                     with st.expander(expander_label):
