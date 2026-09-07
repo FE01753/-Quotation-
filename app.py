@@ -246,27 +246,12 @@ with tab1:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（含資料庫容量面板）
+# Tab 2: 統一整合列表（無逗號 Smart Search）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
     
     db_data = load_db()
-
-    # --- 計算並顯示系統容量數據 ---
-    db_file_size = os.path.getsize(DB_FILE) / 1024 if os.path.exists(DB_FILE) else 0  # KB
-    pdf_count = len(db_data)
-    
-    total_pdf_size = sum(os.path.getsize(os.path.join(PDF_DIR, f)) for f in os.listdir(PDF_DIR) if os.path.isfile(os.path.join(PDF_DIR, f))) / (1024 * 1024) if os.path.exists(PDF_DIR) else 0 # MB
-    total_thumb_size = sum(os.path.getsize(os.path.join(THUMB_DIR, f)) for f in os.listdir(THUMB_DIR) if os.path.isfile(os.path.join(THUMB_DIR, f))) / 1024 if os.path.exists(THUMB_DIR) else 0 # KB
-
-    with st.expander("📊 系統存儲狀態（Database & Storage Info）", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        c1.metric("📦 紀錄總數", f"{pdf_count} 個")
-        c2.metric("📄 JSON 數據大小", f"{db_file_size:.2f} KB")
-        c3.metric("📁 PDF 總容量", f"{total_pdf_size:.2f} MB")
-    
-    st.markdown("---")
 
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
@@ -426,11 +411,16 @@ with tab2:
                         else:
                             st.error("找不到對應的 PDF 檔案。")
 
-# --- 專屬水印 Footer ---
+# --- 計算數據並隱藏於頁面最底的超小水印 ---
+db_file_size = (os.path.getsize(DB_FILE) / 1024) if os.path.exists(DB_FILE) else 0  # KB
+pdf_count = len(db_data)
+total_pdf_size = sum(os.path.getsize(os.path.join(PDF_DIR, f)) for f in os.listdir(PDF_DIR) if os.path.isfile(os.path.join(PDF_DIR, f))) / (1024 * 1024) if os.path.exists(PDF_DIR) else 0 # MB
+
 st.markdown("---")
 st.markdown(
-    "<div style='text-align: center; color: gray; font-size: 14px;'>"
-    "🛠️ <b>Design by nikki 💅</b>"
-    "</div>", 
+    f"<div style='text-align: center; color: #a0a0a0; font-size: 11px; line-height: 1.4;'>"
+    f"🛠️ <b>Design by nikki 💅</b><br>"
+    f"<span style='opacity: 0.6;'>Database Info: {pdf_count} records | JSON: {db_file_size:.1f} KB | PDFs: {total_pdf_size:.2f} MB</span>"
+    f"</div>", 
     unsafe_allow_html=True
 )
