@@ -91,13 +91,14 @@ tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類檢�
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation PDF 檔案")
-    st.write("一次過選取多個 PDF，系統會自動辨識新檔或取代現有同名檔案。")
+    st.write("一次過選取多個 PDF，選好後請按下方的執行按鈕進行分析與取代。")
 
     uploaded_pdfs = st.file_uploader("選擇多個 Quotation PDF 檔案", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_pdfs:
         st.info(f"已選取 {len(uploaded_pdfs)} 個檔案準備上載。")
         
+        # 確保按鈕清楚顯示
         if st.button("🚀 開始智能批量分析與歸檔", type="primary"):
             db_data = load_db()
             
@@ -113,7 +114,6 @@ with tab1:
                 
                 # 檢查是否已存在相同檔名
                 if original_name in existing_map:
-                    # 取得舊紀錄作直接更新 (取代)
                     record = existing_map[original_name]
                     filename = record["filename"]
                     file_path = os.path.join(PDF_DIR, filename)
@@ -136,11 +136,10 @@ with tab1:
                     else:
                         extracted_text = "未啟用 PDF 文字萃取套件"
                     
-                    # 重新進行智能分析
                     client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
                     clean_project_name = os.path.splitext(original_name)[0]
                     
-                    # 更新舊紀錄的數值
+                    # 更新舊紀錄
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = clean_project_name
                     record["client_name"] = client_name
@@ -189,7 +188,7 @@ with tab1:
                     }
                     
                     db_data.append(new_record)
-                    existing_map[original_name] = new_record  # 避免同一次批量中有重複
+                    existing_map[original_name] = new_record
                     success_count += 1
                 
             save_db(db_data)
