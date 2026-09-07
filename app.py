@@ -256,17 +256,15 @@ with tab2:
             if target_del_id:
                 target_rec = next((item for item in db_data if item["id"] == target_del_id), None)
                 if target_rec:
-                    st.warning(準備刪除：`{target_rec['original_filename']}` (公司: {target_rec['client_company']}))
+                    st.warning(f"準備刪除：`{target_rec['original_filename']}` (公司: {target_rec['client_company']})")
                     if st.button("⚠️ 確認永久刪除此記錄及實體 PDF", type="primary"):
-                        # 刪除實體檔案
                         f_path = os.path.join(PDF_DIR, target_rec['filename'])
                         if os.path.exists(f_path):
                             os.remove(f_path)
                         
-                        # 從資料庫移除
                         db_data = [item for item in db_data if item["id"] != target_del_id]
                         save_db(db_data)
-                        st.success(f"成功刪除記錄！請重新整理頁面。")
+                        st.success("成功刪除記錄！請重新整理頁面。")
                         st.rerun()
 
 # --- 專屬水印 Footer ---
