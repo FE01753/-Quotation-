@@ -80,30 +80,47 @@ def smart_analyze_pdf(filename, text):
             
     return detected_client_company, detected_attention, amount_found
 
-def render_pdf_preview(file_path):
+# --- 定義彈出式預覽對話框 (Modal Dialog) ---
+@st.dialog("📄 PDF 檔案即時預覽", width="large")
+def show_pdf_dialog(record):
+    st.markdown(f"**檔名：** {record['original_filename']}")
+    
+    file_path = os.path.join(PDF_DIR, record['filename'])
     if os.path.exists(file_path):
         with open(file_path, "rb") as f:
-            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
-        # 改用 <object> 標籤提升相容性
-        pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="650px"><p>您的瀏覽器不支援內嵌 PDF 預覽，請使用下方下載按鈕。</p></object>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
+            pdf_bytes = f.read()
+            
+        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         
-        # 額外提供下載按鈕以防萬一
-        with open(file_path, "rb") as f:
+        # 內嵌預覽
+        pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="550px"><p>您的瀏覽器不支援內嵌 PDF 預覽，請使用下方下載按鈕。</p></object>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
             st.download_button(
-                label="📥 下載此 PDF 檔案查看",
-                data=f.read(),
-                file_path=file_path,
-                file_name=os.path.basename(file_path),
-                mime="application/pdf"
+                label="📥 下載此 PDF 檔案",
+                data=pdf_bytes,
+                file_name=record['original_filename'],
+                mime="application/pdf",
+                key=f"modal_dl_{record['id']}"
+            )
+        with col_d2:
+            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {record['original_filename']}"
+            encoded_share_text = urllib.parse.quote(share_text)
+            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+            st.markdown(
+                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:6px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">💬 WhatsApp 傳送</button></a>',
+                unsafe_allow_html=True
             )
     else:
-        st.error(f"找不到對應的 PDF 檔案：{file_path}")
+        st.error("找不到對應的 PDF 檔案。")
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊檔案名稱即時預覽，或直接按 Del 刪除！")
+st.write("批量上傳 PDF，點擊檔案名稱即彈出視窗預覽，或直接按 Del 刪除！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -231,7 +248,7 @@ with tab2:
         col_h1, col_h2, col_h3, col_h4 = st.columns([1, 2, 7, 2])
         col_h1.markdown("**ID**")
         col_h2.markdown("**日期**")
-        col_h3.markdown("**Original Filename (點擊預覽)**")
+        col_h3.markdown("**Original Filename (點擊彈出預覽)**")
         col_h4.markdown("**操作**")
         st.markdown("---")
         
@@ -240,9 +257,9 @@ with tab2:
             c1.write(str(item['id']))
             c2.write(item['date'])
             
-            # 點擊檔名按鈕作預覽觸發
-            if c3.button(item['original_filename'], key=f"preview_{item['id']}"):
-                st.session_state['preview_id'] = item['id']
+            # 點擊檔名按鈕直接彈出 Modal 預覽視窗
+            if c3.button(item['original_filename'], key=f"preview_modal_{item['id']}"):
+                show_pdf_dialog(item)
                 
             # 直接在檔名後面設刪除按鈕
             if c4.button("🗑️ Del", key=f"del_{item['id']}"):
@@ -253,33 +270,8 @@ with tab2:
                 db_data = [d for d in db_data if d["id"] != item["id"]]
                 save_db(db_data)
                 
-                if st.session_state.get('preview_id') == item['id']:
-                    st.session_state['preview_id'] = None
-                    
                 st.success(f"已成功刪除：{item['original_filename']}")
                 st.rerun()
-
-        # 預覽區塊
-        preview_id = st.session_state.get('preview_id')
-        if preview_id:
-            selected_record = next((item for item in db_data if item['id'] == preview_id), None)
-            if selected_record:
-                st.markdown("---")
-                st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
-                
-                # --- WhatsApp 快速分享按鈕 ---
-                share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}"
-                encoded_share_text = urllib.parse.quote(share_text)
-                whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
-                
-                st.markdown(
-                    f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送檔案比同事</button></a>',
-                    unsafe_allow_html=True
-                )
-                st.markdown("<br>", unsafe_allow_html=True)
-                
-                file_path = os.path.join(PDF_DIR, selected_record['filename'])
-                render_pdf_preview(file_path)
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
