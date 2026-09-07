@@ -70,9 +70,8 @@ def generate_thumbnail(pdf_path, thumb_path):
     except Exception:
         return False
 
-# 智能提取 PDF 內容與 Work Description
+# 智能提取 PDF 內容與 Work Description (精準捕捉 Re: 標題)
 def parse_pdf_content(file_path, original_name):
-    # 嚴格收窄 Drawing 判定，避免誤傷 Quotation 裡面嘅 Elevation/Tray 字眼
     is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT"])
     if is_drawing or not HAS_PYMUPDF:
         return "圖則/未分類", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF。"
@@ -85,16 +84,33 @@ def parse_pdf_content(file_path, original_name):
         doc.close()
 
         extracted_desc = ""
-        
-        # 尋找 "Dear Sir" 或 "Dear Sir/Madam" 下面嘅字眼作為 Work Description
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
-        for i, line in enumerate(lines):
-            if "dear sir" in line.lower() or "madam" in line.lower():
-                desc_candidates = lines[i+1 : i+4]
-                if desc_candidates:
-                    extracted_desc = " ".join(desc_candidates)
-                    break
         
+        # 1. 優先尋找 "Re:" 或 "SUBJECT:" 後面嘅字眼（工程 Quotation 最準確嘅 Work Description）
+        for i, line in enumerate(lines):
+            if line.lower().startswith("re:") or line.lower().startswith("subject:"):
+                # 提取 Re: 後面嘅內容
+                content = line.split(":", 1)[1].strip()
+                # 如果同一行已經有好長嘅描述
+                if len(content) > 5:
+                    extracted_desc = content
+                    # 順便把下面連埋一齊嘅行（如果有換行）接埋落去
+                    for next_line in lines[i+1 : i+3]:
+                        if next_line.lower().startswith("as per") or next_line.lower().startswith("dear") or ":" in next_line:
+                            break
+                        extracted_desc += " " + next_line
+                    break
+
+        # 2. 如果搵唔到 Re:，試尋找 "Dear Sir/Madam" 下面嘅字眼
+        if not extracted_desc:
+            for i, line in enumerate(lines):
+                if "dear sir" in line.lower() or "madam" in line.lower():
+                    desc_candidates = lines[i+1 : i+4]
+                    if desc_candidates:
+                        extracted_desc = " ".join(desc_candidates)
+                        break
+        
+        # 3. 如果都搵唔用，試 "Description"
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "description" in line.lower():
@@ -103,11 +119,13 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc = " ".join(desc_candidates)
                         break
 
+        # 4. Fallback 用檔名
         if not extracted_desc or len(extracted_desc) < 3:
             extracted_desc = clean_name_fallback(original_name)
 
-        if len(extracted_desc) > 80:
-            extracted_desc = extracted_desc[:77] + "..."
+        # 限制長度避免太長
+        if len(extracted_desc) > 90:
+            extracted_desc = extracted_desc[:87] + "..."
 
         return extracted_desc, extracted_desc, full_text[:500]
 
@@ -121,7 +139,7 @@ def clean_name_fallback(name):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，自動捕捉 Work Description，享受極速預覽！")
+st.write("批量上傳 PDF，精準捕捉 Re: Work Description，享受極速預覽！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -291,7 +309,6 @@ with tab2:
                                 
                             st.markdown("⚡ **網頁秒開預覽：**")
                             
-                            # 自動補救機制：如果舊檔冇縮圖，現場即刻自動補整一張！
                             thumb_file = item.get("thumb_filename")
                             thumb_path = os.path.join(THUMB_DIR, thumb_file) if thumb_file else ""
                             
@@ -300,7 +317,7 @@ with tab2:
                                 thumb_path = os.path.join(THUMB_DIR, thumb_file)
                                 generate_thumbnail(file_path, thumb_path)
                                 item["thumb_filename"] = thumb_file
-                                save_db(db_data) # 更新資料庫記錄
+                                save_db(db_data)
 
                             if os.path.exists(thumb_path):
                                 st.image(thumb_path, caption=f"Work Description: {work_desc_display}", use_container_width=True)
