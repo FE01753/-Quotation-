@@ -4,7 +4,6 @@ import os
 import json
 import urllib.parse
 from datetime import datetime
-import re
 
 try:
     import fitz  # PyMuPDF
@@ -62,9 +61,10 @@ def generate_thumbnail(pdf_path, thumb_path):
         return False
     try:
         doc = fitz.open(pdf_path)
-        page = doc[0]
-        pix = page.get_pixmap(dpi=72)
-        pix.save(thumb_path)
+        if len(doc) > 0:
+            page = doc[0]
+            pix = page.get_pixmap(dpi=72)
+            pix.save(thumb_path)
         doc.close()
         return True
     except Exception:
@@ -72,10 +72,10 @@ def generate_thumbnail(pdf_path, thumb_path):
 
 # 智能提取 PDF 內容與 Work Description
 def parse_pdf_content(file_path, original_name):
-    # 1. 判斷是否為 Drawing (圖則) -> Drawing 則 SKIP 深度文字解析
-    is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT", "E&M", "DWG"])
+    # 嚴格收窄 Drawing 判定，避免誤傷 Quotation 裡面嘅 Elevation/Tray 字眼
+    is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT"])
     if is_drawing or not HAS_PYMUPDF:
-        return "圖則/未分類", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF，已略過文字萃取。"
+        return "圖則/未分類", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF。"
 
     try:
         doc = fitz.open(file_path)
@@ -90,13 +90,11 @@ def parse_pdf_content(file_path, original_name):
         lines = [line.strip() for line in full_text.split('\n') if line.strip()]
         for i, line in enumerate(lines):
             if "dear sir" in line.lower() or "madam" in line.lower():
-                # 攞之後嘅幾行作為工程內容
                 desc_candidates = lines[i+1 : i+4]
                 if desc_candidates:
                     extracted_desc = " ".join(desc_candidates)
                     break
         
-        # 如果搵唔到 Dear Sir，試吓搵 "Description" 關鍵字
         if not extracted_desc:
             for i, line in enumerate(lines):
                 if "description" in line.lower():
@@ -105,11 +103,9 @@ def parse_pdf_content(file_path, original_name):
                         extracted_desc = " ".join(desc_candidates)
                         break
 
-        # 如果都搵唔到，用檔名做 fallback
-        if not extracted_desc or len(extracted_desc) < 5:
+        if not extracted_desc or len(extracted_desc) < 3:
             extracted_desc = clean_name_fallback(original_name)
 
-        # 限制長度避免太長
         if len(extracted_desc) > 80:
             extracted_desc = extracted_desc[:77] + "..."
 
@@ -125,7 +121,7 @@ def clean_name_fallback(name):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，自動捕捉 Work Description，享受極速零延遲預覽！")
+st.write("批量上傳 PDF，自動捕捉 Work Description，享受極速預覽！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -155,12 +151,10 @@ with tab1:
             for idx, uploaded_pdf in enumerate(uploaded_pdfs):
                 original_name = uploaded_pdf.name
                 
-                # 先暫存檔案以便讀取文字
                 temp_save_path = os.path.join(PDF_DIR, "temp_" + original_name)
                 with open(temp_save_path, "wb") as f:
                     f.write(uploaded_pdf.getbuffer())
 
-                # 智能提取 Work Name / Description
                 work_desc, project_name, extracted_text = parse_pdf_content(temp_save_path, original_name)
 
                 if original_name in existing_map:
@@ -168,7 +162,6 @@ with tab1:
                     filename = record["filename"]
                     file_path = os.path.join(PDF_DIR, filename)
                     
-                    # 移動暫存檔到正式檔名
                     os.replace(temp_save_path, file_path)
                     
                     thumb_filename = f"thumb_{os.path.splitext(filename)[0]}.png"
@@ -177,7 +170,7 @@ with tab1:
                     
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = project_name
-                    record["client_company"] = work_desc  # 將 Work Description 放入類別以便預覽與 Search
+                    record["client_company"] = work_desc
                     record["thumb_filename"] = thumb_filename
                     replaced_count += 1
                 else:
@@ -195,7 +188,7 @@ with tab1:
                         "id": new_id,
                         "date": str(datetime.today().date()),
                         "project_name": project_name,
-                        "client_company": work_desc,  # 自動對應嘅 Work Description
+                        "client_company": work_desc,
                         "attention_name": "未偵測",
                         "amount": "未偵測",
                         "filename": filename,
@@ -213,7 +206,7 @@ with tab1:
             progress_bar.empty()
             
             if success_count > 0:
-                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案，已自動捕捉 Work Description！")
+                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案！")
             if replaced_count > 0:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
@@ -298,20 +291,21 @@ with tab2:
                                 
                             st.markdown("⚡ **網頁秒開預覽：**")
                             
+                            # 自動補救機制：如果舊檔冇縮圖，現場即刻自動補整一張！
                             thumb_file = item.get("thumb_filename")
                             thumb_path = os.path.join(THUMB_DIR, thumb_file) if thumb_file else ""
                             
-                            if thumb_file and os.path.exists(thumb_path):
+                            if not thumb_file or not os.path.exists(thumb_path):
+                                thumb_file = f"thumb_auto_{item['id']}.png"
+                                thumb_path = os.path.join(THUMB_DIR, thumb_file)
+                                generate_thumbnail(file_path, thumb_path)
+                                item["thumb_filename"] = thumb_file
+                                save_db(db_data) # 更新資料庫記錄
+
+                            if os.path.exists(thumb_path):
                                 st.image(thumb_path, caption=f"Work Description: {work_desc_display}", use_container_width=True)
                             else:
-                                if HAS_PYMUPDF:
-                                    temp_thumb = os.path.join(THUMB_DIR, f"thumb_temp_{item['id']}.png")
-                                    if generate_thumbnail(file_path, temp_thumb):
-                                        st.image(temp_thumb, caption=f"{item['original_filename']}", use_container_width=True)
-                                    else:
-                                        st.warning("無法顯示預覽圖。")
-                                else:
-                                    st.info("請安裝 PyMuPDF 支援極速縮圖。")
+                                st.warning("無法顯示預覽圖。")
 
                             st.markdown("---")
                             
