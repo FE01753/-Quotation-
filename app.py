@@ -31,7 +31,9 @@ st.markdown(
 )
 
 PDF_DIR = "quotations_pdf_storage"
+THUMB_DIR = "quotations_thumbnail_storage"
 os.makedirs(PDF_DIR, exist_ok=True)
+os.makedirs(THUMB_DIR, exist_ok=True)
 DB_FILE = "quotations_database.json"
 
 def load_db():
@@ -53,31 +55,29 @@ def save_db(data):
     except Exception as e:
         st.error(f"儲存資料庫失敗: {e}")
 
-# 快取圖片生成過程，大幅提升載入速度（避免重複運算）
-@st.cache_data
-def get_pdf_preview_image(file_path, mtime):
-    if not HAS_PYMUPDF or not os.path.exists(file_path):
-        return None
+# 生成並儲存縮圖函數
+def generate_thumbnail(pdf_path, thumb_path):
+    if not HAS_PYMUPDF:
+        return False
     try:
-        doc = fitz.open(file_path)
-        page = doc[0]  # 第一頁
-        # DPI 設為 96 保持清晰同時檔案極輕，秒開無壓力
-        pix = page.get_pixmap(dpi=96)
-        img_bytes = pix.tobytes("png")
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+        pix = page.get_pixmap(dpi=72)  # 72 DPI 極速輕量
+        pix.save(thumb_path)
         doc.close()
-        return img_bytes
+        return True
     except Exception:
-        return None
+        return False
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，享受極速快取預覽體驗！")
+st.write("批量上傳 PDF，享受極速零延遲預覽體驗！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
 # ==========================================
-# Tab 1: 批量上載與極速分析
+# Tab 1: 批量上載與極速分析（順便預先生成縮圖）
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation / Drawing PDF 檔案")
@@ -109,22 +109,31 @@ with tab1:
                     record = existing_map[original_name]
                     filename = record["filename"]
                     file_path = os.path.join(PDF_DIR, filename)
+                    thumb_filename = f"thumb_{os.path.splitext(filename)[0]}.png"
+                    thumb_path = os.path.join(THUMB_DIR, thumb_filename)
                     
                     with open(file_path, "wb") as f:
                         f.write(uploaded_pdf.getbuffer())
                         
+                    generate_thumbnail(file_path, thumb_path)
+                    
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = clean_project_name
                     record["client_company"] = detected_client
+                    record["thumb_filename"] = thumb_filename
                     replaced_count += 1
                 else:
                     new_id = (db_data[-1]["id"] + 1) if db_data else 1
                     filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
                     file_path = os.path.join(PDF_DIR, filename)
+                    thumb_filename = f"thumb_q_{new_id}.png"
+                    thumb_path = os.path.join(THUMB_DIR, thumb_filename)
                     
                     with open(file_path, "wb") as f:
                         f.write(uploaded_pdf.getbuffer())
                         
+                    generate_thumbnail(file_path, thumb_path)
+                    
                     new_record = {
                         "id": new_id,
                         "date": str(datetime.today().date()),
@@ -134,6 +143,7 @@ with tab1:
                         "amount": "未偵測",
                         "filename": filename,
                         "original_filename": original_name,
+                        "thumb_filename": thumb_filename,
                         "extracted_text": "【系統提示】此檔案為圖則/PDF，已略過文字萃取以保持極速載入。"
                     }
                     db_data.append(new_record)
@@ -146,12 +156,12 @@ with tab1:
             progress_bar.empty()
             
             if success_count > 0:
-                st.success(f"🎉 成功極速歸檔 {success_count} 個全新檔案！")
+                st.success(f"🎉 成功極速歸檔 {success_count} 個全新檔案並完成秒開預覽優化！")
             if replaced_count > 0:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（快取預覽、下載、批量管理）
+# Tab 2: 統一整合列表（秒開預覽、下載、批量管理）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -195,6 +205,10 @@ with tab2:
                                 target_path = os.path.join(PDF_DIR, item['filename'])
                                 if os.path.exists(target_path):
                                     os.remove(target_path)
+                                if "thumb_filename" in item:
+                                    thumb_path = os.path.join(THUMB_DIR, item['thumb_filename'])
+                                    if os.path.exists(thumb_path):
+                                        os.remove(thumb_path)
                             else:
                                 db_data_updated.append(item)
                         
@@ -221,17 +235,24 @@ with tab2:
                             with open(file_path, "rb") as f:
                                 pdf_bytes = f.read()
                                 
-                            st.markdown("👀 **網頁即時預覽（快取加速中）：**")
+                            st.markdown("⚡ **網頁秒開預覽：**")
                             
-                            if HAS_PYMUPDF:
-                                file_mtime = os.path.getmtime(file_path)
-                                img_bytes = get_pdf_preview_image(file_path, file_mtime)
-                                if img_bytes:
-                                    st.image(img_bytes, caption=f"{item['original_filename']} (第 1 頁)", use_container_width=True)
-                                else:
-                                    st.warning("無法生成預覽圖片。")
+                            # 直接讀取預先整好嘅縮圖，0 延遲秒彈出黎
+                            thumb_file = item.get("thumb_filename")
+                            thumb_path = os.path.join(THUMB_DIR, thumb_file) if thumb_file else ""
+                            
+                            if thumb_file and os.path.exists(thumb_path):
+                                st.image(thumb_path, caption=f"{item['original_filename']} (秒開預覽)", use_container_width=True)
                             else:
-                                st.info("💡 提示：請確保已安裝 PyMuPDF 套件。")
+                                # 萬一舊紀錄冇縮圖，現場補整一次
+                                if HAS_PYMUPDF:
+                                    temp_thumb = os.path.join(THUMB_DIR, f"thumb_temp_{item['id']}.png")
+                                    if generate_thumbnail(file_path, temp_thumb):
+                                        st.image(temp_thumb, caption=f"{item['original_filename']}", use_container_width=True)
+                                    else:
+                                        st.warning("無法顯示預覽圖。")
+                                else:
+                                    st.info("請安裝 PyMuPDF 支援極速縮圖。")
 
                             st.markdown("---")
                             
@@ -256,6 +277,8 @@ with tab2:
                                 if st.button("🗑️ 刪除", key=f"single_del_{item['id']}"):
                                     if os.path.exists(file_path):
                                         os.remove(file_path)
+                                    if thumb_file and os.path.exists(thumb_path):
+                                        os.remove(thumb_path)
                                     db_data = [d for d in db_data if d["id"] != item["id"]]
                                     save_db(db_data)
                                     st.success(f"已刪除：{item['original_filename']}")
