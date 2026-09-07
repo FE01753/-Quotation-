@@ -4,6 +4,7 @@ import os
 import json
 import urllib.parse
 from datetime import datetime
+import re
 
 try:
     import fitz  # PyMuPDF
@@ -55,29 +56,81 @@ def save_db(data):
     except Exception as e:
         st.error(f"儲存資料庫失敗: {e}")
 
-# 生成並儲存縮圖函數
+# 生成縮圖函數
 def generate_thumbnail(pdf_path, thumb_path):
     if not HAS_PYMUPDF:
         return False
     try:
         doc = fitz.open(pdf_path)
         page = doc[0]
-        pix = page.get_pixmap(dpi=72)  # 72 DPI 極速輕量
+        pix = page.get_pixmap(dpi=72)
         pix.save(thumb_path)
         doc.close()
         return True
     except Exception:
         return False
 
+# 智能提取 PDF 內容與 Work Description
+def parse_pdf_content(file_path, original_name):
+    # 1. 判斷是否為 Drawing (圖則) -> Drawing 則 SKIP 深度文字解析
+    is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT", "E&M", "DWG"])
+    if is_drawing or not HAS_PYMUPDF:
+        return "圖則/未分類", clean_name_fallback(original_name), "【系統提示】此檔案為圖則/PDF，已略過文字萃取。"
+
+    try:
+        doc = fitz.open(file_path)
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text() + "\n"
+        doc.close()
+
+        extracted_desc = ""
+        
+        # 尋找 "Dear Sir" 或 "Dear Sir/Madam" 下面嘅字眼作為 Work Description
+        lines = [line.strip() for line in full_text.split('\n') if line.strip()]
+        for i, line in enumerate(lines):
+            if "dear sir" in line.lower() or "madam" in line.lower():
+                # 攞之後嘅幾行作為工程內容
+                desc_candidates = lines[i+1 : i+4]
+                if desc_candidates:
+                    extracted_desc = " ".join(desc_candidates)
+                    break
+        
+        # 如果搵唔到 Dear Sir，試吓搵 "Description" 關鍵字
+        if not extracted_desc:
+            for i, line in enumerate(lines):
+                if "description" in line.lower():
+                    desc_candidates = lines[i+1 : i+3]
+                    if desc_candidates:
+                        extracted_desc = " ".join(desc_candidates)
+                        break
+
+        # 如果都搵唔到，用檔名做 fallback
+        if not extracted_desc or len(extracted_desc) < 5:
+            extracted_desc = clean_name_fallback(original_name)
+
+        # 限制長度避免太長
+        if len(extracted_desc) > 80:
+            extracted_desc = extracted_desc[:77] + "..."
+
+        return extracted_desc, extracted_desc, full_text[:500]
+
+    except Exception:
+        return clean_name_fallback(original_name), clean_name_fallback(original_name), "解析失敗"
+
+def clean_name_fallback(name):
+    base = os.path.splitext(name)[0]
+    return base
+
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，享受極速零延遲預覽體驗！")
+st.write("批量上傳 PDF，自動捕捉 Work Description，享受極速零延遲預覽！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
 # ==========================================
-# Tab 1: 批量上載與極速分析（順便預先生成縮圖）
+# Tab 1: 批量上載與智能分析
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation / Drawing PDF 檔案")
@@ -86,7 +139,7 @@ with tab1:
     if uploaded_pdfs:
         st.info(f"已選取 {len(uploaded_pdfs)} 個檔案準備上載。")
     
-    if st.button("🚀 開始極速批量歸檔", type="primary"):
+    if st.button("🚀 開始智能批量歸檔", type="primary"):
         if not uploaded_pdfs:
             st.warning("請先選擇至少一個 PDF 檔案！")
         else:
@@ -101,50 +154,54 @@ with tab1:
             
             for idx, uploaded_pdf in enumerate(uploaded_pdfs):
                 original_name = uploaded_pdf.name
-                clean_project_name = os.path.splitext(original_name)[0]
-                is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT", "E&M"])
-                detected_client = "圖則/未分類" if is_drawing else clean_project_name
                 
+                # 先暫存檔案以便讀取文字
+                temp_save_path = os.path.join(PDF_DIR, "temp_" + original_name)
+                with open(temp_save_path, "wb") as f:
+                    f.write(uploaded_pdf.getbuffer())
+
+                # 智能提取 Work Name / Description
+                work_desc, project_name, extracted_text = parse_pdf_content(temp_save_path, original_name)
+
                 if original_name in existing_map:
                     record = existing_map[original_name]
                     filename = record["filename"]
                     file_path = os.path.join(PDF_DIR, filename)
+                    
+                    # 移動暫存檔到正式檔名
+                    os.replace(temp_save_path, file_path)
+                    
                     thumb_filename = f"thumb_{os.path.splitext(filename)[0]}.png"
                     thumb_path = os.path.join(THUMB_DIR, thumb_filename)
-                    
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_pdf.getbuffer())
-                        
                     generate_thumbnail(file_path, thumb_path)
                     
                     record["date"] = str(datetime.today().date())
-                    record["project_name"] = clean_project_name
-                    record["client_company"] = detected_client
+                    record["project_name"] = project_name
+                    record["client_company"] = work_desc  # 將 Work Description 放入類別以便預覽與 Search
                     record["thumb_filename"] = thumb_filename
                     replaced_count += 1
                 else:
                     new_id = (db_data[-1]["id"] + 1) if db_data else 1
                     filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
                     file_path = os.path.join(PDF_DIR, filename)
+                    
+                    os.replace(temp_save_path, file_path)
+                    
                     thumb_filename = f"thumb_q_{new_id}.png"
                     thumb_path = os.path.join(THUMB_DIR, thumb_filename)
-                    
-                    with open(file_path, "wb") as f:
-                        f.write(uploaded_pdf.getbuffer())
-                        
                     generate_thumbnail(file_path, thumb_path)
                     
                     new_record = {
                         "id": new_id,
                         "date": str(datetime.today().date()),
-                        "project_name": clean_project_name,
-                        "client_company": detected_client,
+                        "project_name": project_name,
+                        "client_company": work_desc,  # 自動對應嘅 Work Description
                         "attention_name": "未偵測",
                         "amount": "未偵測",
                         "filename": filename,
                         "original_filename": original_name,
                         "thumb_filename": thumb_filename,
-                        "extracted_text": "【系統提示】此檔案為圖則/PDF，已略過文字萃取以保持極速載入。"
+                        "extracted_text": extracted_text
                     }
                     db_data.append(new_record)
                     existing_map[original_name] = new_record
@@ -156,12 +213,12 @@ with tab1:
             progress_bar.empty()
             
             if success_count > 0:
-                st.success(f"🎉 成功極速歸檔 {success_count} 個全新檔案並完成秒開預覽優化！")
+                st.success(f"🎉 成功智能歸檔 {success_count} 個檔案，已自動捕捉 Work Description！")
             if replaced_count > 0:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（秒開預覽、下載、批量管理）
+# Tab 2: 統一整合列表（智能搜尋 Work Description）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -171,10 +228,13 @@ with tab2:
     if not db_data:
         st.info("暫無紀錄，請先上載 PDF。")
     else:
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（檔名）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（可搜檔名或 Work Description）：", value="")
         filtered_data = db_data
         if search_kw:
-            filtered_data = [item for item in db_data if search_kw.lower() in item['original_filename'].lower()]
+            filtered_data = [
+                item for item in db_data 
+                if search_kw.lower() in item['original_filename'].lower() or search_kw.lower() in item.get('client_company', '').lower()
+            ]
 
         st.markdown("---")
 
@@ -230,21 +290,20 @@ with tab2:
                     st.checkbox("", key=f"chk_{item['id']}", label_visibility="collapsed")
                     
                 with col_exp:
-                    with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']} | 類別: {item.get('client_company', '未分類')}"):
+                    work_desc_display = item.get('client_company', '未分類')
+                    with st.expander(f"📄 [ID: {item['id']}] {item['original_filename']} | 🛠️ {work_desc_display}"):
                         if os.path.exists(file_path):
                             with open(file_path, "rb") as f:
                                 pdf_bytes = f.read()
                                 
                             st.markdown("⚡ **網頁秒開預覽：**")
                             
-                            # 直接讀取預先整好嘅縮圖，0 延遲秒彈出黎
                             thumb_file = item.get("thumb_filename")
                             thumb_path = os.path.join(THUMB_DIR, thumb_file) if thumb_file else ""
                             
                             if thumb_file and os.path.exists(thumb_path):
-                                st.image(thumb_path, caption=f"{item['original_filename']} (秒開預覽)", use_container_width=True)
+                                st.image(thumb_path, caption=f"Work Description: {work_desc_display}", use_container_width=True)
                             else:
-                                # 萬一舊紀錄冇縮圖，現場補整一次
                                 if HAS_PYMUPDF:
                                     temp_thumb = os.path.join(THUMB_DIR, f"thumb_temp_{item['id']}.png")
                                     if generate_thumbnail(file_path, temp_thumb):
@@ -266,7 +325,7 @@ with tab2:
                                     key=f"dl_{item['id']}"
                                 )
                             with col_btn2:
-                                share_text = f"🛠️ E&M Drawing/Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
+                                share_text = f"🛠️ E&M Work Description (Design by nikki 💅)：\n- 項目: {work_desc_display}\n- 檔名: {item['original_filename']}"
                                 encoded_share_text = urllib.parse.quote(share_text)
                                 whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
                                 st.markdown(
