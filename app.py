@@ -4,6 +4,7 @@ import os
 import json
 import urllib.parse
 from datetime import datetime
+import base64
 
 st.set_page_config(page_title="智能工程 Quotation 檔案管理系統", page_icon="📁", layout="centered")
 
@@ -28,7 +29,6 @@ PDF_DIR = "quotations_pdf_storage"
 os.makedirs(PDF_DIR, exist_ok=True)
 DB_FILE = "quotations_database.json"
 
-# --- 防崩潰 Database 讀取 ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
@@ -38,7 +38,6 @@ def load_db():
                     return []
                 return data
         except Exception:
-            # 如果 JSON 損毀或過大導致讀取失敗，自動重設以防白屏死機
             return []
     return []
 
@@ -52,7 +51,7 @@ def save_db(data):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，享受極速秒速歸檔體驗！")
+st.write("批量上傳 PDF，享受極速秒速歸檔與網頁內嵌預覽體驗！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -131,7 +130,7 @@ with tab1:
                 st.info(f"🔄 已自動完成取代與更新 {replaced_count} 個重複檔案。")
 
 # ==========================================
-# Tab 2: 統一整合列表（檢視、預覽、下載、批量管理）
+# Tab 2: 統一整合列表（內嵌即時預覽、下載、批量管理）
 # ==========================================
 with tab2:
     st.subheader("📂 智能檢視、預覽與管理")
@@ -201,7 +200,14 @@ with tab2:
                             with open(file_path, "rb") as f:
                                 pdf_bytes = f.read()
                                 
-                            st.info("💡 貼士：點擊下方按鈕即可在瀏覽器新分頁完美開啟 PDF 閱讀（避開 Chrome 內嵌黑屏限制）。")
+                            # 轉換為 Base64 嵌入 HTML 進行網頁內嵌預覽
+                            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+                            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="550px" type="application/pdf"></iframe>'
+                            
+                            st.markdown("🔍 **PDF 即時預覽：**")
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+                            
+                            st.markdown("---")
                             
                             col_btn1, col_btn2, col_btn3 = st.columns([3, 3, 1.5])
                             with col_btn1:
@@ -223,7 +229,7 @@ with tab2:
                             with col_btn3:
                                 if st.button("🗑️ 刪除", key=f"single_del_{item['id']}"):
                                     if os.path.exists(file_path):
-                                        os.path.remove(file_path)
+                                        os.remove(file_path)
                                     db_data = [d for d in db_data if d["id"] != item["id"]]
                                     save_db(db_data)
                                     st.success(f"已刪除：{item['original_filename']}")
