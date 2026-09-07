@@ -83,7 +83,7 @@ def smart_analyze_pdf(filename, text):
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF，點擊按鈕即時彈出選單，一鍵放大預覽、下載或傳送！")
+st.write("批量上傳 PDF，點擊按鈕即時彈出選單，一鍵下載開啟或傳送！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -220,7 +220,7 @@ with tab2:
             c1.write(str(item['id']))
             c2.write(item['date'])
             
-            # 使用 st.popover 彈出選單，提供「開新分頁檢視」、「下載」、「WhatsApp」
+            # 使用 st.popover 彈出選單，提供穩定可靠的下載與 WhatsApp 功能
             with c3:
                 with st.popover(f"📄 {item['original_filename']}"):
                     st.markdown(f"### 📄 檔案管理選項")
@@ -232,19 +232,9 @@ with tab2:
                         with open(file_path, "rb") as f:
                             pdf_bytes = f.read()
                             
-                        # 轉 Base64 以供在新分頁中完美開啟
-                        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-                        pdf_data_url = f"data:application/pdf;base64,{base64_pdf}"
-                        
-                        # 1. 在新分頁檢視按鈕
-                        st.markdown(
-                            f'<a href="{pdf_data_url}" target="_blank"><button style="background-color:#1f77b4; color:white; padding:8px 14px; border:none; border-radius:4px; font-weight:bold; cursor:pointer; width:100%; margin-bottom:8px;">🔍 喺新分頁放大檢視 PDF</button></a>',
-                            unsafe_allow_html=True
-                        )
-                        
-                        # 2. 下載按鈕
+                        # 穩定下載按鈕（一按即開或下載）
                         st.download_button(
-                            label="📥 下載此 PDF 檔案",
+                            label="📥 下載 / 開啟 PDF 檔案",
                             data=pdf_bytes,
                             file_name=item['original_filename'],
                             mime="application/pdf",
@@ -253,7 +243,7 @@ with tab2:
                         
                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        # 3. WhatsApp 傳送按鈕
+                        # WhatsApp 傳送按鈕
                         share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {item['original_filename']}"
                         encoded_share_text = urllib.parse.quote(share_text)
                         whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
