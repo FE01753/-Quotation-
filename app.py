@@ -2,15 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-import re
-from datetime import datetime
 import urllib.parse
-
-try:
-    import pypdf
-    PDF_SUPPORT = True
-except ImportError:
-    PDF_SUPPORT = False
+from datetime import datetime
 
 st.set_page_config(page_title="智能工程 Quotation 檔案管理系統", page_icon="📁", layout="centered")
 
@@ -35,33 +28,31 @@ PDF_DIR = "quotations_pdf_storage"
 os.makedirs(PDF_DIR, exist_ok=True)
 DB_FILE = "quotations_database.json"
 
+# --- 防崩潰 Database 讀取 ---
 def load_db():
     if os.path.exists(DB_FILE):
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                for item in data:
-                    if "client_company" not in item:
-                        item["client_company"] = item.get("client_name", "未分類公司")
-                    if "attention_name" not in item:
-                        item["attention_name"] = "未偵測"
-                    if "project_name" not in item:
-                        item["project_name"] = os.path.splitext(item.get("original_filename", "unknown"))[0]
-                    if "amount" not in item:
-                        item["amount"] = "未偵測"
+                if not isinstance(data, list):
+                    return []
                 return data
-        except:
+        except Exception:
+            # 如果 JSON 損毀或過大導致讀取失敗，自動重設以防白屏死機
             return []
     return []
 
 def save_db(data):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"儲存資料庫失敗: {e}")
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF（支援高速略過圖則），享受極速秒速歸檔體驗！")
+st.write("批量上傳 PDF，享受極速秒速歸檔體驗！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -84,17 +75,13 @@ with tab1:
             
             success_count = 0
             replaced_count = 0
-            replaced_files = []
             
-            # 使用進度條提升體驗
             progress_bar = st.progress(0)
             total_files = len(uploaded_pdfs)
             
             for idx, uploaded_pdf in enumerate(uploaded_pdfs):
                 original_name = uploaded_pdf.name
                 clean_project_name = os.path.splitext(original_name)[0]
-                
-                # 判斷是否為圖則（檔名包含 Plan, Drawing, CSD, FS 等關鍵字可以標註）
                 is_drawing = any(k in original_name.upper() for k in ["PLAN", "DWG", "CSD", "LAYOUT", "E&M"])
                 detected_client = "圖則/未分類" if is_drawing else clean_project_name
                 
@@ -109,10 +96,7 @@ with tab1:
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = clean_project_name
                     record["client_company"] = detected_client
-                    record["extracted_text"] = "【系統提示】此檔案為圖則/PDF，已略過文字萃取以保持極速載入。"
-                    
                     replaced_count += 1
-                    replaced_files.append(original_name)
                 else:
                     new_id = (db_data[-1]["id"] + 1) if db_data else 1
                     filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
@@ -132,12 +116,10 @@ with tab1:
                         "original_filename": original_name,
                         "extracted_text": "【系統提示】此檔案為圖則/PDF，已略過文字萃取以保持極速載入。"
                     }
-                    
                     db_data.append(new_record)
                     existing_map[original_name] = new_record
                     success_count += 1
                 
-                # 更新進度條
                 progress_bar.progress((idx + 1) / total_files)
                 
             save_db(db_data)
@@ -241,7 +223,7 @@ with tab2:
                             with col_btn3:
                                 if st.button("🗑️ 刪除", key=f"single_del_{item['id']}"):
                                     if os.path.exists(file_path):
-                                        os.remove(file_path)
+                                        os.path.remove(file_path)
                                     db_data = [d for d in db_data if d["id"] != item["id"]]
                                     save_db(db_data)
                                     st.success(f"已刪除：{item['original_filename']}")
