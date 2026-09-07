@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import base64
 import re
 from datetime import datetime
 
@@ -80,29 +81,36 @@ def smart_analyze_pdf(filename, text):
             
     return detected_client, category, amount_found
 
+# --- 顯示 PDF 預覽的輔助函數 ---
+def render_pdf_preview(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="650px" type="application/pdf"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+    else:
+        st.error("找不到對應的 PDF 檔案。")
+
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
-st.write("批量上傳 PDF：如發現相同檔名會自動進行**取代 (Overwrite)** 並更新內文與分類！")
+st.write("批量上傳 PDF：自動分析分類、取代重複檔案，並提供即時網頁預覽 (Preview)！")
 
-tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類檢視與搜尋"])
+tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類預覽與搜尋"])
 
 # ==========================================
 # Tab 1: 批量上載與智能分析
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation PDF 檔案")
-    st.write("一次過選取多個 PDF，選好後請按下方的執行按鈕進行分析與取代。")
+    st.write("一次過選取多個 PDF，系統會自動辨識新檔或取代現有同名檔案。")
 
     uploaded_pdfs = st.file_uploader("選擇多個 Quotation PDF 檔案", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_pdfs:
         st.info(f"已選取 {len(uploaded_pdfs)} 個檔案準備上載。")
         
-        # 確保按鈕清楚顯示
         if st.button("🚀 開始智能批量分析與歸檔", type="primary"):
             db_data = load_db()
-            
-            # 建立快速查找字典：{ original_filename: record_item }
             existing_map = {item.get("original_filename"): item for item in db_data}
             
             success_count = 0
@@ -112,17 +120,14 @@ with tab1:
             for uploaded_pdf in uploaded_pdfs:
                 original_name = uploaded_pdf.name
                 
-                # 檢查是否已存在相同檔名
                 if original_name in existing_map:
                     record = existing_map[original_name]
                     filename = record["filename"]
                     file_path = os.path.join(PDF_DIR, filename)
                     
-                    # 覆蓋實體檔案
                     with open(file_path, "wb") as f:
                         f.write(uploaded_pdf.getbuffer())
                         
-                    # 重新提取 PDF 文字
                     extracted_text = ""
                     if PDF_SUPPORT:
                         try:
@@ -139,7 +144,6 @@ with tab1:
                     client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
                     clean_project_name = os.path.splitext(original_name)[0]
                     
-                    # 更新舊紀錄
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = clean_project_name
                     record["client_name"] = client_name
@@ -151,7 +155,6 @@ with tab1:
                     replaced_files.append(original_name)
                     
                 else:
-                    # 全新檔案新增
                     new_id = (db_data[-1]["id"] + 1) if db_data else 1
                     filename = f"q_{new_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{original_name}"
                     file_path = os.path.join(PDF_DIR, filename)
@@ -199,11 +202,11 @@ with tab1:
                 st.info(f"🔄 偵測到 {replaced_count} 個重複檔案，已自動完成**取代與更新**：\n- " + "\n- ".join(replaced_files))
 
 # ==========================================
-# Tab 2: 智能分類檢視與搜尋
+# Tab 2: 智能分類預覽與搜尋
 # ==========================================
 with tab2:
-    st.subheader("📂 智能分類檢視與多維度搜尋")
-    st.write("你可以按客戶/公司、工程種類進行篩選，或者直接搜尋內文！")
+    st.subheader("📂 智能分類預覽與多維度搜尋")
+    st.write("過濾項目後，直接選擇 ID 即可在下方即時預覽 PDF 內容！")
 
     db_data = load_db()
 
@@ -239,34 +242,19 @@ with tab2:
         display_df = filtered_df[['id', 'date', 'client_name', 'category', 'project_name', 'amount', 'original_filename']]
         st.dataframe(display_df, use_container_width=True)
         
+        # 選擇 ID 進行直接網頁預覽
         valid_ids = list(filtered_df['id'])
         if valid_ids:
-            selected_id = st.selectbox("選擇要檢視或下載嘅 Quotation ID：", options=[None] + valid_ids)
+            selected_id = st.selectbox("🎯 選擇要即時預覽 (Preview) 的 Quotation ID：", options=[None] + valid_ids)
             if selected_id:
                 record = next((item for item in db_data if item["id"] == selected_id), None)
                 if record:
+                    st.markdown(f"### 📄 預覽中：{record['original_filename']}")
                     st.markdown(f"**項目：** {record['project_name']} | **客戶：** {record['client_name']} | **分類：** {record['category']} | **金額：** {record['amount']}")
-                    file_path = os.path.join(PDF_DIR, record['filename'])
                     
-                    if os.path.exists(file_path):
-                        with open(file_path, "rb") as f:
-                            st.download_button(
-                                label=f"📥 下載原始 PDF ({record['original_filename']})",
-                                data=f,
-                                file_name=record['original_filename'],
-                                mime="application/pdf"
-                            )
-                    with st.expander("📄 檢視 PDF 自動提取的完整內文"):
-                        st.text_area("Extracted Text", value=record['extracted_text'], height=250)
-
-        st.divider()
-        csv_data = display_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 匯出篩選後的總表為 CSV",
-            data=csv_data,
-            file_name=f"quotations_smart_database_{datetime.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+                    file_path = os.path.join(PDF_DIR, record['filename'])
+                    # 直接呼叫網頁內嵌預覽
+                    render_pdf_preview(file_path)
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
