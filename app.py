@@ -5,6 +5,7 @@ import json
 import base64
 import re
 from datetime import datetime
+import urllib.parse
 
 # 嘗試引入 PDF 讀取工具
 try:
@@ -49,28 +50,17 @@ def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- 智能分析 PDF 內文與檔名的函數 ---
+# --- 智能分析 PDF 內文：提取第一行作公司，Attention 作聯絡人 ---
 def smart_analyze_pdf(filename, text):
-    client_keywords = ["Regent Hotel", "K11 Musea", "K11", "Regent", "MTR", "Link", "Airport", "Sands", "W Hotel"]
-    detected_client = "其他 / 未分類"
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    detected_client_company = lines[0] if len(lines) > 0 else os.path.splitext(filename)[0]
     
-    combined_str = filename + " " + text
-    for kw in client_keywords:
-        if kw.lower() in combined_str.lower():
-            detected_client = kw
+    detected_attention = "未偵測"
+    for line in lines:
+        if "attention" in line.lower() or "attn" in line.lower():
+            detected_attention = line
             break
             
-    if any(k in combined_str.lower() for k in ["fs", "fire", "消防", "sprinkler", "alarm", "afa"]):
-        category = "Fire Services (FS)"
-    elif any(k in combined_str.lower() for k in ["elv", "cctv", "security", "data", "network"]):
-        category = "Extra Low Voltage (ELV)"
-    elif any(k in combined_str.lower() for k in ["el", "electrical", "power", "mcb", "fuse", "電力"]):
-        category = "Electrical (EL)"
-    elif any(k in combined_str.lower() for k in ["hvac", "chiller", "fcu", "ventilation", "冷氣", "通風", "vac"]):
-        category = "HVAC / Mechanical"
-    else:
-        category = "General E&M Works"
-        
     amount_found = "未偵測"
     amount_patterns = [r"HK\$\s*[\d,]+\.?\d*", r"\$\s*[\d,]+\.?\d*", r"Total\s*:\s*[\d,]+\.?\d*"]
     for pattern in amount_patterns:
@@ -79,7 +69,7 @@ def smart_analyze_pdf(filename, text):
             amount_found = match.group(0)
             break
             
-    return detected_client, category, amount_found
+    return detected_client_company, detected_attention, amount_found
 
 # --- 顯示 PDF 預覽的輔助函數 ---
 def render_pdf_preview(file_path):
@@ -93,17 +83,15 @@ def render_pdf_preview(file_path):
 
 # --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
-st.write("批量上傳 PDF：自動分析分類、取代重複檔案，並提供即時網頁預覽 (Preview)！")
+st.write("批量上傳 PDF：自動識別公司與 Attention，點擊表格即時預覽、刪除及 WhatsApp 分享！")
 
-tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能分類預覽與搜尋"])
+tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
 # ==========================================
 # Tab 1: 批量上載與智能分析
 # ==========================================
 with tab1:
     st.subheader("📤 批量上載 Quotation PDF 檔案")
-    st.write("一次過選取多個 PDF，系統會自動辨識新檔或取代現有同名檔案。")
-
     uploaded_pdfs = st.file_uploader("選擇多個 Quotation PDF 檔案", type=["pdf"], accept_multiple_files=True)
     
     if uploaded_pdfs:
@@ -141,13 +129,13 @@ with tab1:
                     else:
                         extracted_text = "未啟用 PDF 文字萃取套件"
                     
-                    client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
+                    client_company, attention_name, detected_amount = smart_analyze_pdf(original_name, extracted_text)
                     clean_project_name = os.path.splitext(original_name)[0]
                     
                     record["date"] = str(datetime.today().date())
                     record["project_name"] = clean_project_name
-                    record["client_name"] = client_name
-                    record["category"] = category
+                    record["client_company"] = client_company
+                    record["attention_name"] = attention_name
                     record["amount"] = detected_amount
                     record["extracted_text"] = extracted_text
                     
@@ -175,15 +163,15 @@ with tab1:
                     else:
                         extracted_text = "未啟用 PDF 文字萃取套件"
                     
-                    client_name, category, detected_amount = smart_analyze_pdf(original_name, extracted_text)
+                    client_company, attention_name, detected_amount = smart_analyze_pdf(original_name, extracted_text)
                     clean_project_name = os.path.splitext(original_name)[0]
                     
                     new_record = {
                         "id": new_id,
                         "date": str(datetime.today().date()),
                         "project_name": clean_project_name,
-                        "client_name": client_name,
-                        "category": category,
+                        "client_company": client_company,
+                        "attention_name": attention_name,
                         "amount": detected_amount,
                         "filename": filename,
                         "original_filename": original_name,
@@ -202,11 +190,11 @@ with tab1:
                 st.info(f"🔄 偵測到 {replaced_count} 個重複檔案，已自動完成**取代與更新**：\n- " + "\n- ".join(replaced_files))
 
 # ==========================================
-# Tab 2: 智能分類預覽與搜尋
+# Tab 2: 智能檢視、預覽與管理
 # ==========================================
 with tab2:
-    st.subheader("📂 智能分類預覽與多維度搜尋")
-    st.write("過濾項目後，直接選擇 ID 即可在下方即時預覽 PDF 內容！")
+    st.subheader("📂 智能檢視、預覽與管理")
+    st.write("點選下方表格中的項目即可即時預覽。如需刪除或分享，請利用下方的工具列。")
 
     db_data = load_db()
 
@@ -215,46 +203,71 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            all_clients = ["全部"] + list(df_pdf['client_name'].unique())
-            selected_client_filter = st.selectbox("🏢 按客戶/公司篩選：", options=all_clients)
-        with col_f2:
-            all_cats = ["全部"] + list(df_pdf['category'].unique())
-            selected_cat_filter = st.selectbox("⚙️ 按工程系統篩選：", options=all_cats)
-            
-        filtered_df = df_pdf.copy()
-        if selected_client_filter != "全部":
-            filtered_df = filtered_df[filtered_df['client_name'] == selected_client_filter]
-        if selected_cat_filter != "全部":
-            filtered_df = filtered_df[filtered_df['category'] == selected_cat_filter]
-
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（檔名、金額、內文細節）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（公司名稱、Attention、檔名、金額）：", value="")
         if search_kw:
-            filtered_df = filtered_df[
-                filtered_df['project_name'].str.contains(search_kw, case=False, na=False) |
-                filtered_df['original_filename'].str.contains(search_kw, case=False, na=False) |
-                filtered_df['extracted_text'].str.contains(search_kw, case=False, na=False) |
-                filtered_df['amount'].str.contains(search_kw, case=False, na=False)
+            df_pdf = df_pdf[
+                df_pdf['client_company'].str.contains(search_kw, case=False, na=False) |
+                df_pdf['attention_name'].str.contains(search_kw, case=False, na=False) |
+                df_pdf['original_filename'].str.contains(search_kw, case=False, na=False) |
+                df_pdf['amount'].str.contains(search_kw, case=False, na=False)
             ]
 
-        st.write(f"共找到 {len(filtered_df)} 個符合條件的 Quotation 紀錄：")
-        display_df = filtered_df[['id', 'date', 'client_name', 'category', 'project_name', 'amount', 'original_filename']]
-        st.dataframe(display_df, use_container_width=True)
+        display_df = df_pdf[['id', 'date', 'client_company', 'attention_name', 'project_name', 'amount', 'original_filename']]
         
-        # 選擇 ID 進行直接網頁預覽
-        valid_ids = list(filtered_df['id'])
-        if valid_ids:
-            selected_id = st.selectbox("🎯 選擇要即時預覽 (Preview) 的 Quotation ID：", options=[None] + valid_ids)
-            if selected_id:
-                record = next((item for item in db_data if item["id"] == selected_id), None)
-                if record:
-                    st.markdown(f"### 📄 預覽中：{record['original_filename']}")
-                    st.markdown(f"**項目：** {record['project_name']} | **客戶：** {record['client_name']} | **分類：** {record['category']} | **金額：** {record['amount']}")
-                    
-                    file_path = os.path.join(PDF_DIR, record['filename'])
-                    # 直接呼叫網頁內嵌預覽
-                    render_pdf_preview(file_path)
+        st.write("👇 **請點選你想預覽的記錄行：**")
+        event = st.dataframe(
+            display_df,
+            use_container_width=True,
+            selection_mode="single-row",
+            on_select="rerun"
+        )
+        
+        selected_rows = event.selection.get("rows", [])
+        
+        if selected_rows:
+            selected_index = selected_rows[0]
+            selected_record = df_pdf.iloc[selected_index]
+            
+            st.markdown("---")
+            st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
+            st.markdown(f"**公司：** {selected_record['client_company']} | **Attention：** {selected_record['attention_name']} | **金額：** {selected_record['amount']}")
+            
+            # --- WhatsApp 快速分享按鈕 ---
+            share_text = f"🛠️ E&M Quotation 參考分享：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- Attention: {selected_record['attention_name']}\n- 金額: {selected_record['amount']}"
+            encoded_share_text = urllib.parse.quote(share_text)
+            whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
+            
+            st.markdown(
+                f'<a href="{whatsapp_url}" target="_blank"><button style="background-color:#25D366; color:white; padding:8px 16px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">💬 WhatsApp 傳送摘要比同事</button></a>',
+                unsafe_allow_html=True
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            file_path = os.path.join(PDF_DIR, selected_record['filename'])
+            render_pdf_preview(file_path)
+
+        st.divider()
+        
+        # --- 刪除檔案專區 ---
+        with st.expander("🗑️ 管理與刪除不需要的 Quotation 記錄"):
+            del_ids = [item['id'] for item in db_data]
+            target_del_id = st.selectbox("選擇要刪除的 Quotation ID：", options=[None] + del_ids)
+            
+            if target_del_id:
+                target_rec = next((item for item in db_data if item["id"] == target_del_id), None)
+                if target_rec:
+                    st.warning(準備刪除：`{target_rec['original_filename']}` (公司: {target_rec['client_company']}))
+                    if st.button("⚠️ 確認永久刪除此記錄及實體 PDF", type="primary"):
+                        # 刪除實體檔案
+                        f_path = os.path.join(PDF_DIR, target_rec['filename'])
+                        if os.path.exists(f_path):
+                            os.remove(f_path)
+                        
+                        # 從資料庫移除
+                        db_data = [item for item in db_data if item["id"] != target_del_id]
+                        save_db(db_data)
+                        st.success(f"成功刪除記錄！請重新整理頁面。")
+                        st.rerun()
 
 # --- 專屬水印 Footer ---
 st.markdown("---")
