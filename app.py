@@ -42,7 +42,6 @@ def load_db():
         try:
             with open(DB_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                # 自動兼容舊資料格式，避免 KeyError
                 for item in data:
                     if "client_company" not in item:
                         item["client_company"] = item.get("client_name", "未分類公司")
@@ -61,7 +60,6 @@ def save_db(data):
     with open(DB_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-# --- 智能分析 PDF 內文：提取第一行作公司，Attention 作聯絡人 ---
 def smart_analyze_pdf(filename, text):
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     detected_client_company = lines[0] if len(lines) > 0 else os.path.splitext(filename)[0]
@@ -82,7 +80,6 @@ def smart_analyze_pdf(filename, text):
             
     return detected_client_company, detected_attention, amount_found
 
-# --- 顯示 PDF 預覽的輔助函數 ---
 def render_pdf_preview(file_path):
     if os.path.exists(file_path):
         with open(file_path, "rb") as f:
@@ -92,10 +89,10 @@ def render_pdf_preview(file_path):
     else:
         st.error("找不到對應的 PDF 檔案。")
 
-# --- App 標題與分頁 (加入 nikki 水印標記) ---
+# --- App 標題與分頁 ---
 st.title("📁 智能工程 Quotation 檔案管理系統")
 st.caption("✨ System curated & Design by nikki 💅")
-st.write("批量上傳 PDF：自動識別公司與 Attention，點擊表格即時預覽、刪除及 WhatsApp 分享！")
+st.write("批量上傳 PDF：自動識別公司，點擊表格即時預覽、刪除及 WhatsApp 分享！")
 
 tab1, tab2 = st.tabs(["📤 批量上載與智能分析", "📂 智能檢視、預覽與管理"])
 
@@ -215,16 +212,16 @@ with tab2:
     else:
         df_pdf = pd.DataFrame(db_data)
         
-        search_kw = st.text_input("🔍 自由關鍵字搜尋（公司名稱、Attention、檔名、金額）：", value="")
+        search_kw = st.text_input("🔍 自由關鍵字搜尋（公司名稱、檔名、金額）：", value="")
         if search_kw:
             df_pdf = df_pdf[
                 df_pdf['client_company'].str.contains(search_kw, case=False, na=False) |
-                df_pdf['attention_name'].str.contains(search_kw, case=False, na=False) |
                 df_pdf['original_filename'].str.contains(search_kw, case=False, na=False) |
                 df_pdf['amount'].str.contains(search_kw, case=False, na=False)
             ]
 
-        display_df = df_pdf[['id', 'date', 'client_company', 'attention_name', 'project_name', 'amount', 'original_filename']]
+        # 已取消顯示 attention_name 欄位
+        display_df = df_pdf[['id', 'date', 'client_company', 'project_name', 'amount', 'original_filename']]
         
         st.write("👇 **請點選你想預覽的記錄行：**")
         event = st.dataframe(
@@ -242,10 +239,10 @@ with tab2:
             
             st.markdown("---")
             st.markdown(f"### 📄 預覽中：{selected_record['original_filename']}")
-            st.markdown(f"**公司：** {selected_record['client_company']} | **Attention：** {selected_record['attention_name']} | **金額：** {selected_record['amount']}")
+            st.markdown(f"**公司：** {selected_record['client_company']} | **金額：** {selected_record['amount']}")
             
             # --- WhatsApp 快速分享按鈕 ---
-            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- Attention: {selected_record['attention_name']}\n- 金額: {selected_record['amount']}"
+            share_text = f"🛠️ E&M Quotation 參考分享 (Design by nikki 💅)：\n- 檔名: {selected_record['original_filename']}\n- 公司: {selected_record['client_company']}\n- 金額: {selected_record['amount']}"
             encoded_share_text = urllib.parse.quote(share_text)
             whatsapp_url = f"https://api.whatsapp.com/send?text={encoded_share_text}"
             
